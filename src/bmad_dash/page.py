@@ -4,7 +4,7 @@ from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
-from bmad_dash.initiatives import Initiative, Worktree
+from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.signals import open_items, ticket_counts
 from bmad_dash.tree import TreeItem, count_items
 
@@ -30,6 +30,9 @@ def worktree_line(worktree: Worktree) -> str:
     return (
         f"<code>{escape(display_path(worktree.path))}</code>"
         f" on <code>{escape(worktree.branch)}</code>"
+        f' <form class="switch" method="post" action="/switch">'
+        f'<input type="hidden" name="id" value="{worktree_id(worktree.path)}">'
+        f'<button type="submit">switch</button></form>'
     )
 
 
@@ -141,6 +144,8 @@ th, td { text-align: left; vertical-align: top; padding: 0.5rem 1rem;
 code { font-size: 0.9em; }
 .none { color: #888; }
 .tree, .tree ul { margin: 0.25rem 0; padding-left: 1.2rem; }
+form.switch { display: inline; margin: 0; }
+form.switch button { font-size: 0.8em; padding: 0 0.4em; cursor: pointer; }
 .updated { color: #888; font-size: 0.85em; }
 .badge { font-size: 0.8em; padding: 0 0.4em; border-radius: 0.6em;
          background: #eee; color: #444; }

@@ -4,6 +4,7 @@ A worktree works on an initiative when its own
 `_bmad/custom/config.user.toml` has `[core] active_initiative = "<slug>"`.
 """
 
+import hashlib
 import subprocess
 import tomllib
 from dataclasses import dataclass, field
@@ -54,6 +55,11 @@ def list_worktrees(root: Path) -> list[Worktree]:
         if path is not None:
             worktrees.append(Worktree(path=path, branch=branch))
     return worktrees
+
+
+def worktree_id(path: Path) -> str:
+    """A short, stable id for a worktree path, safe to put in a form."""
+    return hashlib.sha256(str(path).encode()).hexdigest()[:12]
 
 
 def active_initiative(worktree_path: Path) -> str | None:

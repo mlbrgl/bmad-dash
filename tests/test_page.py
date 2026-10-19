@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from bmad_dash.initiatives import Initiative, Worktree
+from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.page import COLUMNS, render_page
 from bmad_dash.signals import Activity
 from bmad_dash.tree import TreeItem
@@ -139,3 +139,18 @@ def test_tickets_unavailable_shows_question_mark():
 def test_all_dropped_tickets_show_zero_of_zero():
     html = render_page([signals_initiative([{"state": "dropped"}])], Path("/root"))
     assert html.split("<td>")[5].startswith("0/0</td>")
+
+
+def test_switch_button_per_worktree_with_its_id():
+    a, b = Path("/x/a"), Path("/x/b")
+    initiative = Initiative("initiative-a", "A", [Worktree(a, "main"), Worktree(b, "dev")])
+    html = render_page([initiative], Path("/root"))
+    assert html.count('action="/switch"') == 2
+    assert f'name="id" value="{worktree_id(a)}"' in html
+    assert f'name="id" value="{worktree_id(b)}"' in html
+    assert 'method="post"' in html
+
+
+def test_no_switch_button_without_worktree():
+    html = render_page([Initiative("initiative-a", "A", [])], Path("/root"))
+    assert "/switch" not in html
