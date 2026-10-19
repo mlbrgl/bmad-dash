@@ -116,6 +116,14 @@ def test_body_too_big_is_400(switch, project):
     assert launched == []
 
 
+def test_negative_content_length_is_400(switch):
+    # rfile.read(-1) would block until the client hangs up.
+    server, launched = switch
+    status, _ = send(server, headers={"Content-Length": "-1"})
+    assert status == 400
+    assert launched == []
+
+
 def test_missing_content_length_is_400(switch):
     server, launched = switch
     status, _ = send(server)

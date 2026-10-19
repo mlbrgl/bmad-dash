@@ -5,6 +5,7 @@ A worktree works on an initiative when its own
 """
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import tomllib
 from dataclasses import dataclass, field
@@ -127,7 +128,11 @@ def list_initiatives(root: Path, now: datetime | None = None) -> list[Initiative
         (p for p in (root / "_bmad-output").glob("initiative-*") if p.is_dir()),
         key=lambda p: p.name,
     )
-    return [
-        make_initiative(root, d, worktrees_by_slug.get(d.name, []), now)
-        for d in initiative_dirs
-    ]
+    # Each initiative runs its own `tickets.py` call, so build them in parallel:
+    # the page then waits for the slowest call, not the sum of them.
+    # map() keeps the slug order.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return list(pool.map(
+            lambda d: make_initiative(root, d, worktrees_by_slug.get(d.name, []), now),
+            initiative_dirs,
+        ))

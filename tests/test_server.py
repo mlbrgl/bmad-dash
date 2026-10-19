@@ -81,10 +81,10 @@ def files_server(files_project):
     server.server_close()
 
 
-def raw_get(server, path):
+def raw_get(server, path, host=None):
     """GET `path` exactly as given (no client-side normalising)."""
     conn = http.client.HTTPConnection("127.0.0.1", server.server_port)
-    conn.request("GET", path)
+    conn.request("GET", path, headers={"Host": host} if host else {})
     response = conn.getresponse()
     body = response.read()
     conn.close()
@@ -131,3 +131,26 @@ def test_file_outside_is_403(files_server, path):
 def test_file_not_served_is_404(files_server, path):
     response, _ = raw_get(files_server, path)
     assert response.status == 404
+
+
+@pytest.mark.parametrize("path", [
+    "/file/initiative-x/spec-x/spec-x.md",
+    "/file/initiative-x/forge-x/forge-report.html",
+])
+def test_served_files_are_sandboxed(files_server, path):
+    # An opaque origin means a served file can't pass /switch's Origin check.
+    response, _ = raw_get(files_server, path)
+    assert response.getheader("Content-Security-Policy") == "sandbox allow-scripts"
+
+
+def test_dashboard_is_not_sandboxed(files_server):
+    response, _ = raw_get(files_server, "/")
+    assert response.getheader("Content-Security-Policy") is None
+
+
+@pytest.mark.parametrize("path", ["/", "/file/initiative-x/spec-x/spec-x.md"])
+def test_get_with_foreign_host_is_403(files_server, path):
+    # DNS rebinding: the browser sends the attacker's host name.
+    response, _ = raw_get(files_server, path, host="evil.example:80")
+    assert response.status == 403
+

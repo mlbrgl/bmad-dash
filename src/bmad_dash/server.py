@@ -49,6 +49,9 @@ def make_server(
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            if not self.is_own_host():
+                self.send_error(403)
+                return
             path = urlsplit(self.path).path
             if path == "/switch":
                 self.send_response(405)
@@ -93,16 +96,19 @@ def make_server(
             self.send_header("Content-Length", "0")
             self.end_headers()
 
+        def own_hosts(self) -> set[str]:
+            port = self.server.server_port
+            return {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+        def is_own_host(self) -> bool:
+            """Host must be this server. Blocks DNS rebinding on every request."""
+            return self.headers.get("Host") in self.own_hosts()
+
         def is_same_origin(self) -> bool:
             """Host and Origin must both be this server on 127.0.0.1 or localhost.
             Blocks other sites (Origin) and DNS rebinding (Host)."""
-            port = self.server.server_port
-            hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
-            origins = {f"http://{h}" for h in hosts}
-            return (
-                self.headers.get("Host") in hosts
-                and self.headers.get("Origin") in origins
-            )
+            origins = {f"http://{h}" for h in self.own_hosts()}
+            return self.is_own_host() and self.headers.get("Origin") in origins
 
         def read_form(self) -> dict[str, list[str]] | None:
             """The urlencoded body, or None if its size is missing or too big."""
@@ -128,11 +134,16 @@ def make_server(
                 body = render_markdown(target).encode("utf-8")
             else:
                 body = target.read_bytes()
-            self.send_html(body)
+            # Served files are project content, not dashboard code. Sandboxing
+            # gives them an opaque origin, so their requests to /switch carry
+            # `Origin: null` and are refused.
+            self.send_html(body, {"Content-Security-Policy": "sandbox allow-scripts"})
 
-        def send_html(self, body: bytes):
+        def send_html(self, body: bytes, extra_headers: dict[str, str] | None = None):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            for name, value in (extra_headers or {}).items():
+                self.send_header(name, value)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

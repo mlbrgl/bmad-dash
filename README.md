@@ -16,8 +16,18 @@ uv run --directory ~/Code/bmad-dash bmad-dash --project-root ~/Code/owid-grapher
 
 Then open http://127.0.0.1:8765/ (change the port with `--port`).
 
+Each row shows last activity, open items, and tickets done/total from the
+project's `_bmad/method/scripts/tickets.py status` (run with `uv`). When that
+call fails the Tickets cell shows "?". Items untouched for 14 days are stale.
+Expand a row to see its forges, specs and epics.
+
 `/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
-relative to `_bmad-output/`; anything outside it is refused (403).
+relative to `_bmad-output/`; anything outside it is refused (403). Served files
+are sandboxed, so they can't trigger the switch button.
+
+The **switch** button on a worktree runs `code -n <worktree>`, so the `code`
+CLI must be on `PATH`. It only accepts a POST from the dashboard itself, and
+only for a path `git worktree list` shows.
 
 ## Test
 
