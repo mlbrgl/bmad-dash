@@ -16,6 +16,9 @@ uv run --directory ~/Code/bmad-dash bmad-dash --project-root ~/Code/owid-grapher
 
 Then open http://127.0.0.1:8765/ (change the port with `--port`).
 
+`/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
+relative to `_bmad-output/`; anything outside it is refused (403).
+
 ## Test
 
 ```sh

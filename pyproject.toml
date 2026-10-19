@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Local dashboard listing a BMad project's initiatives and the worktrees working on them."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "markdown>=3.11.1",
+]
 
 [project.scripts]
 bmad-dash = "bmad_dash.server:main"

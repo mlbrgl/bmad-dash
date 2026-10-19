@@ -1,3 +1,4 @@
+import http.client
 import subprocess
 import sys
 import threading
@@ -68,3 +69,65 @@ def test_root_not_a_git_repo_exits_with_message(tmp_path):
     result = run_main("--project-root", str(tmp_path))
     assert result.returncode != 0
     assert "not a git repository" in result.stderr
+
+
+@pytest.fixture
+def files_server(files_project):
+    server = make_server(files_project, 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+def raw_get(server, path):
+    """GET `path` exactly as given (no client-side normalising)."""
+    conn = http.client.HTTPConnection("127.0.0.1", server.server_port)
+    conn.request("GET", path)
+    response = conn.getresponse()
+    body = response.read()
+    conn.close()
+    return response, body
+
+
+def test_file_markdown_is_rendered(files_server):
+    response, body = raw_get(files_server, "/file/initiative-x/spec-x/spec-x.md?x=1")
+    assert response.status == 200
+    assert response.getheader("Content-Type").startswith("text/html")
+    assert b"<table>" in body
+    assert b'<pre class="frontmatter">' in body
+
+
+def test_file_html_is_served_as_is(files_server, files_project):
+    response, body = raw_get(files_server, "/file/initiative-x/forge-x/forge-report.html")
+    assert response.status == 200
+    assert response.getheader("Content-Type").startswith("text/html")
+    expected = files_project / "_bmad-output/initiative-x/forge-x/forge-report.html"
+    assert body == expected.read_bytes()
+
+
+def test_file_encoded_name_is_decoded(files_server):
+    response, body = raw_get(files_server, "/file/initiative-x/with%20space.md")
+    assert response.status == 200
+    assert b"<h1>Spaced</h1>" in body
+
+
+@pytest.mark.parametrize("path", [
+    "/file/../README.md",
+    "/file/a/%2e%2e/%2e%2e/README.md",
+    "/file/initiative-x/link-out.md",
+])
+def test_file_outside_is_403(files_server, path):
+    response, _ = raw_get(files_server, path)
+    assert response.status == 403
+
+
+@pytest.mark.parametrize("path", [
+    "/file/initiative-x/config.toml",
+    "/file/initiative-x",
+    "/file/initiative-x/a%00b.md",
+])
+def test_file_not_served_is_404(files_server, path):
+    response, _ = raw_get(files_server, path)
+    assert response.status == 404
