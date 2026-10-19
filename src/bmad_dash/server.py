@@ -3,10 +3,11 @@
 import argparse
 import subprocess
 import sys
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from bmad_dash.files import NotFound, Refused, render_markdown, resolve_file
 from bmad_dash.initiatives import list_initiatives
 from bmad_dash.page import render_page
 
@@ -33,11 +34,33 @@ def make_server(root: Path, port: int) -> ThreadingHTTPServer:
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            if urlsplit(self.path).path != "/":
+            path = urlsplit(self.path).path
+            if path.startswith("/file/"):
+                self.serve_file(unquote(path.removeprefix("/file/")))
+                return
+            if path != "/":
                 self.send_error(404)
                 return
             # Built on each request so the page is always current.
             body = render_page(list_initiatives(root), root).encode("utf-8")
+            self.send_html(body)
+
+        def serve_file(self, rel: str):
+            try:
+                target = resolve_file(root, rel)
+            except Refused:
+                self.send_error(403)
+                return
+            except NotFound:
+                self.send_error(404)
+                return
+            if target.suffix == ".md":
+                body = render_markdown(target).encode("utf-8")
+            else:
+                body = target.read_bytes()
+            self.send_html(body)
+
+        def send_html(self, body: bytes):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

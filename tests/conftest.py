@@ -59,3 +59,49 @@ def project(tmp_path: Path) -> Path:
     write_initiative(root, "initiative-nofile", None)
     (root / "_bmad-output" / "planning-artifacts").mkdir()
     return root
+
+
+SPEC_MD = """---
+title: 'Spec <b>&</b> x'
+status: draft
+---
+# Spec heading
+
+| Col A | Col B |
+|-------|-------|
+| one   | two   |
+
+```python
+print("hi")
+```
+"""
+
+REPORT_HTML = "<!doctype html><html><head><style>h1{color:red}</style></head><body><h1>Report</h1></body></html>\n"
+
+
+@pytest.fixture
+def files_project(project: Path) -> Path:
+    """`project` plus files under `_bmad-output/` for the /file/ route.
+
+    - initiative-x/spec-x/spec-x.md        markdown with frontmatter
+    - initiative-x/forge-x/forge-report.html
+    - initiative-x/with space.md           name needing %20
+    - initiative-x/config.toml, data.json, noext   types we don't serve
+    - initiative-x/link-in.md  -> spec-x/spec-x.md (inside)
+    - initiative-x/link-out.md -> <root>/secret.md (outside)
+    - <root>/secret.md and <root>/README.md outside _bmad-output/
+    """
+    out = project / "_bmad-output" / "initiative-x"
+    (out / "spec-x").mkdir(parents=True)
+    (out / "forge-x").mkdir()
+    (out / "spec-x" / "spec-x.md").write_text(SPEC_MD)
+    (out / "forge-x" / "forge-report.html").write_text(REPORT_HTML)
+    (out / "with space.md").write_text("# Spaced\n")
+    (out / "config.toml").write_text("a = 1\n")
+    (out / "data.json").write_text("{}\n")
+    (out / "noext").write_text("x\n")
+    (project / "secret.md").write_text("# Secret\n")
+    (project / "README.md").write_text("# Readme\n")
+    (out / "link-in.md").symlink_to(out / "spec-x" / "spec-x.md")
+    (out / "link-out.md").symlink_to(project / "secret.md")
+    return project
