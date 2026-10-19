@@ -7,7 +7,10 @@ A worktree works on an initiative when its own
 import subprocess
 import tomllib
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+
+from bmad_dash.tree import TreeItem, build_tree, load_tickets
 
 
 @dataclass
@@ -21,6 +24,9 @@ class Initiative:
     slug: str
     title: str
     worktrees: list[Worktree] = field(default_factory=list)
+    # From one `tickets.py status` call; None when it failed. Reused by later columns.
+    tickets: list[dict] | None = None
+    tree: list[TreeItem] = field(default_factory=list)
 
 
 def list_worktrees(root: Path) -> list[Worktree]:
@@ -84,9 +90,24 @@ def read_title(initiative_dir: Path) -> str:
     return slug
 
 
-def list_initiatives(root: Path) -> list[Initiative]:
+def make_initiative(
+    root: Path, initiative_dir: Path, worktrees: list[Worktree], now: datetime
+) -> Initiative:
+    tickets = load_tickets(root, initiative_dir)
+    return Initiative(
+        slug=initiative_dir.name,
+        title=read_title(initiative_dir),
+        worktrees=worktrees,
+        tickets=tickets,
+        tree=build_tree(initiative_dir, tickets, now),
+    )
+
+
+def list_initiatives(root: Path, now: datetime | None = None) -> list[Initiative]:
     """One Initiative per `_bmad-output/initiative-*` folder, sorted by slug,
-    each with the worktrees whose config names it."""
+    each with the worktrees whose config names it, its tickets and its tree."""
+    if now is None:
+        now = datetime.now()
     worktrees_by_slug: dict[str, list[Worktree]] = {}
     for worktree in list_worktrees(root):
         slug = active_initiative(worktree.path)
@@ -98,10 +119,6 @@ def list_initiatives(root: Path) -> list[Initiative]:
         key=lambda p: p.name,
     )
     return [
-        Initiative(
-            slug=d.name,
-            title=read_title(d),
-            worktrees=worktrees_by_slug.get(d.name, []),
-        )
+        make_initiative(root, d, worktrees_by_slug.get(d.name, []), now)
         for d in initiative_dirs
     ]
