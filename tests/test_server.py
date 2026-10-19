@@ -33,7 +33,7 @@ def test_serves_dashboard_at_root(server):
     assert "Matched one" in html
     assert "feature-a" in html
     assert "detached" in html
-    assert html.count("<tr>") == 1 + 5
+    assert html.count('role="row"') == 1 + 5
 
 
 def test_query_string_is_ignored(server):
