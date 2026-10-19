@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from bmad_dash.initiatives import Initiative, Worktree
+from bmad_dash.signals import open_items, ticket_counts
 from bmad_dash.tree import TreeItem, count_items
 
 
@@ -91,11 +92,44 @@ def tree_cell(initiative: Initiative) -> str:
     )
 
 
+ACTIVITY_TEXT_MAX = 120
+
+
+def activity_cell(initiative: Initiative) -> str:
+    activity = initiative.activity
+    if activity is None:
+        return '<span class="none">none</span>'
+    when = f'<span class="updated">{activity.when:%Y-%m-%d %H:%M}</span>'
+    if not activity.text:
+        return when
+    short = activity.text
+    if len(short) > ACTIVITY_TEXT_MAX:
+        short = short[: ACTIVITY_TEXT_MAX - 1] + "\u2026"
+    return f'{when}<br><span title="{escape(activity.text)}">{escape(short)}</span>'
+
+
+def open_cell(initiative: Initiative) -> str:
+    return str(open_items(initiative.tree))
+
+
+def tickets_cell(initiative: Initiative) -> str:
+    counts = ticket_counts(initiative.tickets)
+    if counts is None:
+        return "?"
+    if initiative.tickets == []:
+        return '<span class="none">none</span>'
+    done, total = counts
+    return f"{done}/{total}"
+
+
 # One (header, cell_fn) per column. Later stories append to this list.
 # Each cell_fn takes an Initiative and returns already-escaped HTML.
 COLUMNS = [
     ("Initiative", initiative_cell),
     ("Worktree / branch", worktrees_cell),
+    ("Last activity", activity_cell),
+    ("Open", open_cell),
+    ("Tickets", tickets_cell),
     ("Contents", tree_cell),
 ]
 

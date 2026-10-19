@@ -3,6 +3,7 @@ from pathlib import Path
 
 from bmad_dash.initiatives import Initiative, Worktree
 from bmad_dash.page import COLUMNS, render_page
+from bmad_dash.signals import Activity
 from bmad_dash.tree import TreeItem
 
 
@@ -76,3 +77,65 @@ def test_tree_without_tickets_shows_note():
 def test_empty_tree_says_nothing_yet():
     html = render_page([Initiative("initiative-a", "A", [])], Path("/root"))
     assert "nothing yet" in html
+
+
+# --- row signals ---
+
+def signals_initiative(tickets, activity=None) -> Initiative:
+    initiative = tree_initiative(tickets)
+    initiative.activity = activity
+    return initiative
+
+
+def test_signal_columns_sit_between_worktree_and_contents():
+    headers = [header for header, _ in COLUMNS]
+    assert headers == ["Initiative", "Worktree / branch", "Last activity",
+                       "Open", "Tickets", "Contents"]
+
+
+def test_activity_cell_shows_time_and_escaped_text():
+    activity = Activity(datetime(2026, 10, 18, 14, 5), "<b>did</b> \"x\"", "memlog")
+    html = render_page([signals_initiative([], activity)], Path("/root"))
+    assert "2026-10-18 14:05" in html
+    assert "<b>did</b>" not in html
+    assert "&lt;b&gt;did&lt;/b&gt; &quot;x&quot;" in html
+
+
+def test_long_activity_text_is_cut_with_full_text_in_title():
+    text = "word " * 50
+    activity = Activity(datetime(2026, 10, 18), text, "commit")
+    html = render_page([signals_initiative([], activity)], Path("/root"))
+    assert f'title="{text}"' in html
+    assert f">{text[:119]}…<" in html
+
+
+def test_activity_without_text_shows_time_only():
+    activity = Activity(datetime(2026, 10, 18, 9, 0), "", "memlog")
+    html = render_page([signals_initiative([], activity)], Path("/root"))
+    assert "2026-10-18 09:00" in html
+    assert "title=" not in html
+
+
+def test_no_activity_and_no_tickets_show_none():
+    html = render_page([signals_initiative([])], Path("/root"))
+    cells = html.split("<td>")
+    assert cells[3].startswith('<span class="none">none</span>')  # last activity
+    assert cells[5].startswith('<span class="none">none</span>')  # tickets
+
+
+def test_open_count_and_ticket_counts():
+    tickets = [{"state": "done"}, {"state": "done"}, {"state": "review"}, {"state": "dropped"}]
+    html = render_page([signals_initiative(tickets)], Path("/root"))
+    cells = html.split("<td>")
+    assert cells[4].startswith("1</td>")  # only the epic is open in tree_initiative
+    assert cells[5].startswith("2/3</td>")
+
+
+def test_tickets_unavailable_shows_question_mark():
+    html = render_page([signals_initiative(None)], Path("/root"))
+    assert html.split("<td>")[5].startswith("?</td>")
+
+
+def test_all_dropped_tickets_show_zero_of_zero():
+    html = render_page([signals_initiative([{"state": "dropped"}])], Path("/root"))
+    assert html.split("<td>")[5].startswith("0/0</td>")

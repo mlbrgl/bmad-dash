@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from bmad_dash.signals import Activity, last_activity
 from bmad_dash.tree import TreeItem, build_tree, load_tickets
 
 
@@ -27,6 +28,7 @@ class Initiative:
     # From one `tickets.py status` call; None when it failed. Reused by later columns.
     tickets: list[dict] | None = None
     tree: list[TreeItem] = field(default_factory=list)
+    activity: Activity | None = None
 
 
 def list_worktrees(root: Path) -> list[Worktree]:
@@ -100,6 +102,7 @@ def make_initiative(
         worktrees=worktrees,
         tickets=tickets,
         tree=build_tree(initiative_dir, tickets, now),
+        activity=last_activity(initiative_dir, worktrees),
     )
 
 
