@@ -25,12 +25,10 @@ def test_single_match_shows_path_and_branch(project):
     assert worktrees == [Worktree(project.parent / "worktrees" / "wt-a", "feature-a")]
 
 
-def test_several_matches_include_main_checkout_and_detached(project):
+def test_several_matches_keep_only_the_first_listed(project):
+    # Main checkout and wt-b both claim it; git lists the main checkout first.
     worktrees = by_slug(project)["initiative-shared"].worktrees
-    assert worktrees == [
-        Worktree(project, "main"),
-        Worktree(project.parent / "worktrees" / "wt-b", "detached"),
-    ]
+    assert worktrees == [Worktree(project, "main")]
 
 
 def test_no_match_has_no_worktrees(project):

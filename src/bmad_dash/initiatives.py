@@ -1,4 +1,4 @@
-"""Find a project's initiatives and the worktrees working on each.
+"""Find a project's initiatives and the worktree working on each.
 
 A worktree works on an initiative when its own
 `_bmad/custom/config.user.toml` has `[core] active_initiative = "<slug>"`.
@@ -26,6 +26,8 @@ class Worktree:
 class Initiative:
     slug: str
     title: str
+    # At most one: the first worktree `git worktree list` gives that claims
+    # this initiative. Kept a list so empty and present read the same everywhere.
     worktrees: list[Worktree] = field(default_factory=list)
     # From one `tickets.py status` call; None when it failed. Reused by later columns.
     tickets: list[dict] | None = None
@@ -122,14 +124,15 @@ def make_initiative(
 
 def list_initiatives(root: Path, now: datetime | None = None) -> list[Initiative]:
     """One Initiative per `_bmad-output/initiative-*` folder, sorted by slug,
-    each with the worktrees whose config names it, its tickets and its tree."""
+    each with the first worktree whose config names it, its tickets and its tree."""
     if now is None:
         now = datetime.now()
     worktrees_by_slug: dict[str, list[Worktree]] = {}
     for worktree in list_worktrees(root):
         slug = active_initiative(worktree.path)
-        if slug:
-            worktrees_by_slug.setdefault(slug, []).append(worktree)
+        # One worktree per initiative: the first one git lists wins.
+        if slug and slug not in worktrees_by_slug:
+            worktrees_by_slug[slug] = [worktree]
 
     initiative_dirs = sorted(
         (p for p in (root / "_bmad-output").glob("initiative-*") if p.is_dir()),

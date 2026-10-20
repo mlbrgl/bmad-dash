@@ -4,7 +4,7 @@ import argparse
 import subprocess
 import sys
 from collections.abc import Callable
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -52,8 +52,9 @@ def make_server(
             if not self.is_own_host():
                 self.send_error(403)
                 return
-            path = urlsplit(self.path).path
-            if path == "/switch":
+            url = urlsplit(self.path)
+            path = url.path
+            if path == "/vscode":
                 self.send_response(405)
                 self.send_header("Allow", "POST")
                 self.send_header("Content-Length", "0")
@@ -65,12 +66,16 @@ def make_server(
             if path != "/":
                 self.send_error(404)
                 return
+            # Only picks which row says "Couldn't open VS Code"; runs nothing.
+            vscode_failed = parse_qs(url.query).get("vscode_failed", [""])[0]
             # Built on each request so the page is always current.
-            body = render_page(list_initiatives(root), root).encode("utf-8")
+            body = render_page(
+                list_initiatives(root), root, vscode_failed=vscode_failed
+            ).encode("utf-8")
             self.send_html(body)
 
         def do_POST(self):
-            if urlsplit(self.path).path != "/switch":
+            if urlsplit(self.path).path != "/vscode":
                 self.send_error(404)
                 return
             if not self.is_same_origin():
@@ -81,18 +86,24 @@ def make_server(
                 self.send_error(400)
                 return
             wanted = form.get("id", [""])[0]
+            slug = form.get("slug", [""])[0]
+            failed = "/?vscode_failed=" + quote(slug, safe="")
             # Fresh list each time: only a path git lists right now can run.
             matches = [w.path for w in list_worktrees(root) if worktree_id(w.path) == wanted]
             if not matches:
-                self.send_error(404)
+                self.redirect(failed)
                 return
             try:
                 launch(matches[0])
-            except OSError:
-                self.send_error(500, "Could not start VS Code (is `code` on PATH?)")
+            except OSError:  # e.g. `code` not on PATH
+                self.redirect(failed)
                 return
+            self.redirect("/")
+
+        def redirect(self, location: str):
+            """303 See Other, so the browser GETs `location`."""
             self.send_response(303)
-            self.send_header("Location", "/")
+            self.send_header("Location", location)
             self.send_header("Content-Length", "0")
             self.end_headers()
 
@@ -134,7 +145,7 @@ def make_server(
             else:
                 body = target.read_bytes()
             # Served files are project content, not dashboard code. Sandboxing
-            # gives them an opaque origin, so their requests to /switch carry
+            # gives them an opaque origin, so their requests to /vscode carry
             # `Origin: null` and are refused.
             self.send_html(body, {"Content-Security-Policy": "sandbox allow-scripts"})
 

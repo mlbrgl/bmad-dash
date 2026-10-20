@@ -8,7 +8,7 @@ and closes panels and remembers which ones are open.
 from datetime import datetime
 from html import escape
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.signals import ticket_counts
@@ -253,23 +253,56 @@ def status_cell(initiative: Initiative, now: datetime) -> str:
     return f'<div class="c-status" role="cell">{SEP.join(parts)}{tag}</div>'
 
 
-def switch_form(worktree: Worktree) -> str:
-    label = escape(f"Switch to {worktree.path.name}")
+VSCODE_FAILED = "Couldn't open VS Code"
+
+
+def resume_href(worktree: Worktree, slug: str) -> str:
+    """A `claude://` link that opens a new session in the worktree with the
+    BMad resume prompt prefilled. Spaces encode as %20, not `+`."""
+    query = urlencode(
+        {"folder": str(worktree.path), "q": f"/bmad Resume work on {slug}"},
+        quote_via=quote,
+    )
+    return f"claude://code/new?{query}"
+
+
+def resume_link(worktree: Worktree, slug: str) -> str:
+    href = escape(resume_href(worktree, slug))
+    label = escape(f"Resume work on {slug}")
+    return f'<a class="btn btn-1" href="{href}" aria-label="{label}">Resume</a>'
+
+
+def vscode_form(initiative: Initiative) -> str:
+    """POSTs the worktree id (what to open) and the slug (where to show a failure)."""
+    worktree = initiative.worktrees[0]
+    label = escape(f"Open {worktree.path.name} in VS Code")
     return (
-        f'<form class="switch" method="post" action="/switch">'
+        f'<form class="vscode" method="post" action="/vscode">'
         f'<input type="hidden" name="id" value="{worktree_id(worktree.path)}">'
-        f'<button type="submit" class="btn" aria-label="{label}">switch</button></form>'
+        f'<input type="hidden" name="slug" value="{escape(initiative.slug)}">'
+        f'<button type="submit" class="btn btn-2" aria-label="{label}">VS Code</button>'
+        f"</form>"
     )
 
 
-def actions_cell(initiative: Initiative) -> str:
-    """Until story 10: one switch form per worktree."""
-    forms = "".join(switch_form(w) for w in initiative.worktrees)
-    return f'<div class="c-btns" role="cell">{forms}</div>'
+def actions_cell(initiative: Initiative, vscode_failed: str = "") -> str:
+    """Resume and VS Code when the row has a worktree, else nothing.
+    The failure message shows even when the worktree has gone since."""
+    parts = []
+    if initiative.worktrees:
+        parts.append(resume_link(initiative.worktrees[0], initiative.slug))
+        parts.append(vscode_form(initiative))
+    if vscode_failed and initiative.slug == vscode_failed:
+        parts.append(f'<span class="err">{VSCODE_FAILED}</span>')
+    return f'<div class="c-btns" role="cell">{"".join(parts)}</div>'
 
 
 def initiative_row(
-    initiative: Initiative, index: int, is_open: bool, now: datetime
+    initiative: Initiative,
+    index: int,
+    is_open: bool,
+    now: datetime,
+    vscode_failed: str = "",
 ) -> str:
     """One grid row. DOM order: title, panel, then the other cells, so Tab runs
     toggle -> tree links -> actions. CSS puts the panel on grid row 2."""
@@ -282,7 +315,7 @@ def initiative_row(
         worktree_cell(initiative),
         activity_cell(initiative, now),
         status_cell(initiative, now),
-        actions_cell(initiative),
+        actions_cell(initiative, vscode_failed),
     ]
     css_class = "init is-finished" if initiative.finished else "init"
     return f'<div class="{css_class}" role="row">{"".join(cells)}</div>'
@@ -400,11 +433,19 @@ code { font-family: var(--mono); font-size: 12px; }
 #finished { margin-top: 8px; }
 
 /* Actions */
-.c-btns { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
-form.switch { margin: 0; }
-.btn { font: inherit; font-size: 13px; font-weight: 500; padding: 6px 12px;
-       border-radius: 6px; white-space: nowrap; cursor: pointer;
-       background: transparent; border: 1px solid var(--line); color: var(--ink); }
+/* Buttons side by side on one line, right-aligned. Like the mockup, the pair
+   is a few px wider than the column and spills into the gap on its left. */
+.c-btns { display: grid; grid-template-columns: auto auto; justify-content: end;
+          align-items: center; gap: 6px; }
+form.vscode { margin: 0; }
+.btn { display: inline-block; font: inherit; font-size: 13px; font-weight: 500;
+       line-height: 1.45; padding: 6px 12px; border-radius: 6px; white-space: nowrap;
+       cursor: pointer; border: 1px solid transparent; }
+.btn:hover { text-decoration: none; }
+.btn-1 { background: var(--accent); color: var(--accent-fg); }
+.btn-2 { background: transparent; border-color: var(--line); color: var(--ink); }
+.c-btns .err { grid-column: 1 / -1; font-size: 12px; text-align: right;
+               white-space: nowrap; }
 
 /* Tree panel: its own grid, same for every row. */
 .panel { margin-top: 16px; padding: 8px 16px; background: var(--panel);
@@ -497,9 +538,15 @@ SCRIPT = """
 """
 
 
-def page_content(initiatives: list[Initiative], root_text: str, now: datetime) -> str:
+def page_content(
+    initiatives: list[Initiative],
+    root_text: str,
+    now: datetime,
+    vscode_failed: str = "",
+) -> str:
     """Unfinished rows in the table, finished ones behind Show finished (n).
-    `initiatives` come sorted; `root_text` is already escaped."""
+    `initiatives` come sorted; `root_text` is already escaped. `vscode_failed`
+    is the slug whose row shows "Couldn't open VS Code"."""
     if not initiatives:
         return f'<p class="empty">No initiatives in <code>{root_text}/_bmad-output/</code>.</p>'
 
@@ -508,7 +555,7 @@ def page_content(initiatives: list[Initiative], root_text: str, now: datetime) -
     open_index = newest_index(current)
     if current:
         rows = "\n".join(
-            initiative_row(initiative, index, index == open_index, now)
+            initiative_row(initiative, index, index == open_index, now, vscode_failed)
             for index, initiative in enumerate(current)
         )
         parts = [
@@ -521,7 +568,7 @@ def page_content(initiatives: list[Initiative], root_text: str, now: datetime) -
     if finished:
         # Panel ids continue after the current rows so they stay unique.
         rows = "\n".join(
-            initiative_row(initiative, len(current) + index, False, now)
+            initiative_row(initiative, len(current) + index, False, now, vscode_failed)
             for index, initiative in enumerate(finished)
         )
         parts.append(
@@ -537,12 +584,17 @@ def page_content(initiatives: list[Initiative], root_text: str, now: datetime) -
 
 
 def render_page(
-    initiatives: list[Initiative], root: Path, now: datetime | None = None
+    initiatives: list[Initiative],
+    root: Path,
+    now: datetime | None = None,
+    vscode_failed: str = "",
 ) -> str:
+    """The whole page. `vscode_failed` is a slug from the URL; it only picks
+    which row shows the failure message."""
     if now is None:
         now = datetime.now()
     root_text = escape(display_path(root))
-    content = page_content(by_activity(initiatives), root_text, now)
+    content = page_content(by_activity(initiatives), root_text, now, vscode_failed)
     storage_key = escape("bmad-dash:open:" + str(root))
     return f"""<!doctype html>
 <html lang="en">

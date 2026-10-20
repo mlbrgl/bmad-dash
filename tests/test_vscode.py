@@ -10,7 +10,7 @@ from bmad_dash.server import default_launch, make_server
 
 
 @pytest.fixture
-def switch(project):
+def vscode(project):
     """A live server with a fake launcher. Yields (server, launched paths)."""
     launched = []
     server = make_server(project, 0, launch=launched.append)
@@ -21,7 +21,7 @@ def switch(project):
     server.server_close()
 
 
-def send(server, method="POST", body=None, headers=None, path="/switch"):
+def send(server, method="POST", body=None, headers=None, path="/vscode"):
     """Send a raw request; returns (status, headers)."""
     port = server.server_port
     base = {"Host": f"127.0.0.1:{port}", "Origin": f"http://127.0.0.1:{port}"}
@@ -45,16 +45,16 @@ def wt_a(project):
     return next(w.path for w in list_worktrees(project) if w.path.name == "wt-a")
 
 
-def test_valid_switch_launches_listed_path(switch, project):
-    server, launched = switch
+def test_valid_open_launches_listed_path(vscode, project):
+    server, launched = vscode
     status, response = send(server, body=urlencode({"id": worktree_id(wt_a(project))}))
     assert status == 303
     assert response.getheader("Location") == "/"
-    assert launched == [wt_a(project)]
+    assert launched == [wt_a(project)]  # called once
 
 
-def test_localhost_host_and_origin_are_accepted(switch, project):
-    server, launched = switch
+def test_localhost_host_and_origin_are_accepted(vscode, project):
+    server, launched = vscode
     port = server.server_port
     headers = {"Host": f"localhost:{port}", "Origin": f"http://localhost:{port}"}
     status, _ = send(server, body=urlencode({"id": worktree_id(project)}), headers=headers)
@@ -62,8 +62,8 @@ def test_localhost_host_and_origin_are_accepted(switch, project):
     assert launched == [project]
 
 
-def test_get_is_405(switch):
-    server, launched = switch
+def test_get_is_405(vscode):
+    server, launched = vscode
     status, response = send(server, method="GET")
     assert status == 405
     assert response.getheader("Allow") == "POST"
@@ -71,16 +71,16 @@ def test_get_is_405(switch):
 
 
 @pytest.mark.parametrize("origin", ["https://evil.example", "http://127.0.0.1:1", None, "null"])
-def test_foreign_or_missing_origin_is_403(switch, project, origin):
-    server, launched = switch
+def test_foreign_or_missing_origin_is_403(vscode, project, origin):
+    server, launched = vscode
     body = urlencode({"id": worktree_id(project)})
     status, _ = send(server, body=body, headers={"Origin": origin})
     assert status == 403
     assert launched == []
 
 
-def test_bad_host_is_403(switch, project):
-    server, launched = switch
+def test_bad_host_is_403(vscode, project):
+    server, launched = vscode
     body = urlencode({"id": worktree_id(project)})
     status, _ = send(server, body=body, headers={"Host": "evil.example:8765"})
     assert status == 403
@@ -88,67 +88,101 @@ def test_bad_host_is_403(switch, project):
 
 
 @pytest.mark.parametrize("fields", [
-    {"id": "000000000000"},
-    {"id": "/etc"},
-    {"path": "/etc"},
-    {},
+    {"id": "000000000000", "slug": "initiative-matched"},
+    {"id": "/etc", "slug": "initiative-matched"},
+    {"path": "/etc", "slug": "initiative-matched"},
+    {"slug": "initiative-matched"},
 ])
-def test_unknown_id_or_path_is_404(switch, fields):
-    server, launched = switch
-    status, _ = send(server, body=urlencode(fields))
-    assert status == 404
+def test_unknown_id_or_path_redirects_with_flag(vscode, fields):
+    server, launched = vscode
+    status, response = send(server, body=urlencode(fields))
+    assert status == 303
+    assert response.getheader("Location") == "/?vscode_failed=initiative-matched"
     assert launched == []
 
 
-def test_path_field_is_ignored_even_with_valid_id_name(switch, project):
-    server, launched = switch
-    body = urlencode({"id": str(project), "path": str(project)})
-    status, _ = send(server, body=body)
-    assert status == 404
+def test_refused_without_slug_redirects_with_empty_flag(vscode):
+    server, launched = vscode
+    status, response = send(server, body=urlencode({"id": "000000000000"}))
+    assert status == 303
+    assert response.getheader("Location") == "/?vscode_failed="
     assert launched == []
 
 
-def test_body_too_big_is_400(switch, project):
-    server, launched = switch
+def test_slug_is_quoted_in_redirect(vscode):
+    server, launched = vscode
+    body = urlencode({"id": "nope", "slug": "a b&c=/d"})
+    status, response = send(server, body=body)
+    assert status == 303
+    assert response.getheader("Location") == "/?vscode_failed=a%20b%26c%3D%2Fd"
+    assert launched == []
+
+
+def test_path_field_is_ignored_even_with_valid_id_name(vscode, project):
+    server, launched = vscode
+    body = urlencode({"id": str(project), "path": str(project), "slug": "x"})
+    status, response = send(server, body=body)
+    assert status == 303
+    assert response.getheader("Location") == "/?vscode_failed=x"
+    assert launched == []
+
+
+def test_slug_field_never_picks_what_opens(vscode, project):
+    # The slug only labels the failure; the id alone picks the worktree.
+    server, launched = vscode
+    body = urlencode({"id": worktree_id(wt_a(project)), "slug": "initiative-shared"})
+    status, response = send(server, body=body)
+    assert status == 303
+    assert response.getheader("Location") == "/"
+    assert launched == [wt_a(project)]
+
+
+def test_body_too_big_is_400(vscode, project):
+    server, launched = vscode
     body = urlencode({"id": worktree_id(project), "pad": "x" * 1100})
     status, _ = send(server, body=body)
     assert status == 400
     assert launched == []
 
 
-def test_negative_content_length_is_400(switch):
+def test_negative_content_length_is_400(vscode):
     # rfile.read(-1) would block until the client hangs up.
-    server, launched = switch
+    server, launched = vscode
     status, _ = send(server, headers={"Content-Length": "-1"})
     assert status == 400
     assert launched == []
 
 
-def test_missing_content_length_is_400(switch):
-    server, launched = switch
+def test_missing_content_length_is_400(vscode):
+    server, launched = vscode
     status, _ = send(server)
     assert status == 400
     assert launched == []
 
 
-def test_post_elsewhere_is_404(switch, project):
-    server, launched = switch
+def test_post_elsewhere_is_404(vscode, project):
+    server, launched = vscode
     status, _ = send(server, body=urlencode({"id": worktree_id(project)}), path="/")
     assert status == 404
     assert launched == []
 
 
-def test_code_missing_is_500(project):
+def test_code_missing_redirects_with_flag(project):
+    calls = []
+
     def broken_launch(path):
+        calls.append(path)
         raise FileNotFoundError("code")
 
     server = make_server(project, 0, launch=broken_launch)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        status, response = send(server, body=urlencode({"id": worktree_id(project)}))
-        assert status == 500
-        assert b"Could not start VS Code" in response.body
+        body = urlencode({"id": worktree_id(project), "slug": "initiative-shared"})
+        status, response = send(server, body=body)
+        assert status == 303
+        assert response.getheader("Location") == "/?vscode_failed=initiative-shared"
+        assert calls == [project]
     finally:
         server.shutdown()
         server.server_close()
@@ -176,3 +210,34 @@ def test_default_launch_runs_code_without_shell_or_wait(monkeypatch, tmp_path):
     assert kwargs["stdin"] is subprocess.DEVNULL
     assert kwargs["stdout"] is subprocess.DEVNULL
     assert kwargs["stderr"] is subprocess.DEVNULL
+
+
+def get_page(server, path):
+    port = server.server_port
+    conn = http.client.HTTPConnection("127.0.0.1", port)
+    conn.request("GET", path, headers={"Host": f"127.0.0.1:{port}"})
+    response = conn.getresponse()
+    body = response.read().decode()
+    conn.close()
+    return response.status, body
+
+
+def test_flag_shows_message_on_that_row_only(vscode):
+    server, launched = vscode
+    status, body = get_page(server, "/?vscode_failed=initiative-matched")
+    assert status == 200
+    assert body.count("Couldn't open VS Code") == 1
+    # The message sits in the initiative-matched row, before the next row starts.
+    rows = body.split('role="row">')
+    matched = [r for r in rows if '<span class="slug">initiative-matched</span>' in r]
+    assert len(matched) == 1
+    assert "Couldn't open VS Code" in matched[0]
+    assert launched == []
+
+
+def test_flag_for_unknown_slug_renders_normally(vscode):
+    server, launched = vscode
+    status, body = get_page(server, "/?vscode_failed=nope")
+    assert status == 200
+    assert "Couldn't open VS Code" not in body
+    assert launched == []

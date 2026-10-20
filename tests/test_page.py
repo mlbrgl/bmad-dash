@@ -482,21 +482,76 @@ def test_tickets_failed_still_shows_stale_tag():
 
 # --- actions cell ---
 
-def test_switch_button_per_worktree_with_its_id():
-    a, b = Path("/x/a"), Path("/x/b")
-    initiative = Initiative("initiative-a", "A", [Worktree(a, "main"), Worktree(b, "dev")])
-    html = render([initiative])
-    assert html.count('action="/switch"') == 2
-    assert f'name="id" value="{worktree_id(a)}"' in html
-    assert f'name="id" value="{worktree_id(b)}"' in html
-    assert 'method="post"' in html
-    assert 'aria-label="Switch to a"' in html
-    assert 'aria-label="Switch to b"' in html
+WT = Path("/x/my wt")
 
 
-def test_no_switch_button_without_worktree():
+def test_resume_link_opens_claude_in_worktree_with_prompt():
+    html = render([Initiative("initiative-a", "A", [Worktree(WT, "main")])])
+    actions = cell(html, "c-btns")
+    href = ("claude://code/new?folder=%2Fx%2Fmy%20wt"
+            "&amp;q=%2Fbmad%20Resume%20work%20on%20initiative-a")
+    assert f'<a class="btn btn-1" href="{href}"' in actions
+    assert ">Resume</a>" in actions
+
+
+def test_vscode_button_posts_id_and_slug():
+    html = render([Initiative("initiative-a", "A", [Worktree(WT, "main")])])
+    actions = cell(html, "c-btns")
+    assert '<form class="vscode" method="post" action="/vscode">' in actions
+    assert f'name="id" value="{worktree_id(WT)}"' in actions
+    assert 'name="slug" value="initiative-a"' in actions
+    assert 'class="btn btn-2"' in actions
+    assert ">VS Code</button>" in actions
+
+
+def test_resume_comes_before_vscode():
+    html = render([Initiative("initiative-a", "A", [Worktree(WT, "main")])])
+    actions = cell(html, "c-btns")
+    assert actions.index(">Resume<") < actions.index(">VS Code<")
+
+
+def test_no_actions_without_worktree():
     html = render([Initiative("initiative-a", "A", [])])
-    assert "/switch" not in html
+    assert cell(html, "c-btns") == ""
+    assert "no worktree" in cell(html, "c-wt")
+
+
+def test_slug_in_actions_is_escaped():
+    html = render([Initiative('i-<b>"', "A", [Worktree(WT, "main")])])
+    actions = cell(html, "c-btns")
+    assert "<b>" not in actions
+    assert 'value="i-&lt;b&gt;&quot;"' in actions
+    assert "i-%3Cb%3E%22" in actions
+
+
+def test_failure_message_on_flagged_row_only():
+    initiatives = [
+        Initiative("initiative-a", "A", [Worktree(WT, "main")]),
+        Initiative("initiative-b", "B", [Worktree(Path("/x/b"), "dev")]),
+    ]
+    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="initiative-b")
+    assert html.count("Couldn't open VS Code") == 1
+    actions = re.findall(r'<div class="c-btns" role="cell">(.*?)</div>', html)
+    assert "Couldn't open VS Code" not in actions[0]
+    assert actions[1].endswith('<span class="err">Couldn\'t open VS Code</span>')
+
+
+def test_failure_message_shows_even_without_worktree():
+    # The worktree vanished between render and click.
+    initiatives = [Initiative("initiative-a", "A", [])]
+    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="initiative-a")
+    assert cell(html, "c-btns") == '<span class="err">Couldn\'t open VS Code</span>'
+
+
+def test_unknown_flag_shows_no_message():
+    initiatives = [Initiative("initiative-a", "A", [Worktree(WT, "main")])]
+    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="nope")
+    assert "Couldn't open VS Code" not in html
+
+
+def test_exactly_one_script():
+    html = render([Initiative("initiative-a", "A", [Worktree(WT, "main")])])
+    assert html.count("<script") == 1
 
 
 def test_now_defaults_to_current_time():

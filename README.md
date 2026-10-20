@@ -30,11 +30,19 @@ Expand a row to see its forges, specs and epics.
 relative to `_bmad-output/`. Rendered `.md` pages get a `← Initiatives` back
 link; a missing path or one outside `_bmad-output/` gets a plain 404 page with
 the same link. Served files
-are sandboxed, so they can't trigger the switch button.
+are sandboxed, so they can't trigger the VS Code button.
 
-The **switch** button on a worktree runs `code -n <worktree>`, so the `code`
-CLI must be on `PATH`. It only accepts a POST from the dashboard itself, and
-only for a path `git worktree list` shows.
+Each initiative shows at most one worktree: the first one `git worktree list`
+gives whose config names it. A row with a worktree has two actions:
+
+- **Resume** opens a new Claude Code session in that worktree
+  (`claude://code/new`) with `/bmad Resume work on <slug>` prefilled.
+- **VS Code** runs `code -n <worktree>`, so the `code` CLI must be on `PATH`.
+  It only accepts a POST from the dashboard itself, and only for a path
+  `git worktree list` shows right now. If it refuses or `code` fails, the row
+  says "Couldn't open VS Code".
+
+A row without a worktree says `no worktree` and has no actions.
 
 ## Test
 

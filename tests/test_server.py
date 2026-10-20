@@ -32,7 +32,8 @@ def test_serves_dashboard_at_root(server):
         html = response.read().decode()
     assert "Matched one" in html
     assert "feature-a" in html
-    assert "detached" in html
+    # wt-b (detached) loses initiative-shared to the main checkout, listed first.
+    assert "detached" not in html
     assert html.count('role="row"') == 1 + 5
 
 
@@ -137,7 +138,7 @@ def test_file_not_served_is_404_page_with_back_link(files_server, path):
     "/file/initiative-x/forge-x/forge-report.html",
 ])
 def test_served_files_are_sandboxed(files_server, path):
-    # An opaque origin means a served file can't pass /switch's Origin check.
+    # An opaque origin means a served file can't pass /vscode's Origin check.
     response, _ = raw_get(files_server, path)
     assert response.getheader("Content-Security-Policy") == "sandbox allow-scripts"
 
