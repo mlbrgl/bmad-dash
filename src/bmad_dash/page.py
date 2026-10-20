@@ -195,12 +195,15 @@ SEP = '<span class="sep">·</span>'
 WAITING_STATES = ["review", "in-progress", "planned", "backlog"]
 MAX_WAITING = 2
 TICKETS_FAILED = "Couldn't read tickets: tickets.py failed"
+# Shown when nothing is open but the initiative file isn't marked done.
+CONFIRM_CLOSE = "confirm close or add work"
 
 
 def is_stale(initiative: Initiative, now: datetime) -> bool:
-    """Last activity is STALE_AFTER old or older."""
+    """Last activity is STALE_AFTER old or older. Finished initiatives never are."""
     activity = initiative.activity
-    return activity is not None and now - activity.when >= STALE_AFTER
+    return (not initiative.finished and activity is not None
+            and now - activity.when >= STALE_AFTER)
 
 
 def has_open(items: list[TreeItem], kind: str) -> bool:
@@ -226,19 +229,26 @@ def waiting_items(initiative: Initiative) -> list[str]:
 
 
 def status_cell(initiative: Initiative, now: datetime) -> str:
-    """The Status sentence: up to 2 waiting items then `+n`, `x/y done`, stale tag."""
-    if initiative.tickets is None:
+    """The Status sentence: up to 2 waiting items then `+n`, `x/y done`, stale tag.
+
+    A finished initiative shows its status word (`done` / `dropped`) instead of
+    waiting items; it comes from the initiative file, so it shows even when
+    `tickets.py` failed.
+    """
+    if initiative.finished:
+        parts = [f'<span class="done-n">{escape(initiative.status)}</span>']
+    elif initiative.tickets is None:
         parts = [f'<span class="err">{TICKETS_FAILED}</span>']
     else:
-        waiting = waiting_items(initiative)
+        waiting = waiting_items(initiative) or [CONFIRM_CLOSE]
         shown = waiting[:MAX_WAITING]
         hidden = len(waiting) - len(shown)
         if hidden:
             shown.append(f"+{hidden}")
         parts = [f'<span class="wait">{escape(item)}</span>' for item in shown]
-        done, total = ticket_counts(initiative.tickets)
-        if total > 0:  # no `x/y done` when there are no counted tickets
-            parts.append(f'<span class="done-n">{done}/{total} done</span>')
+    counts = ticket_counts(initiative.tickets)
+    if counts and counts[1] > 0:  # no `x/y done` without counted tickets
+        parts.append(f'<span class="done-n">{counts[0]}/{counts[1]} done</span>')
     tag = '<span class="stale-tag">stale</span>' if is_stale(initiative, now) else ""
     return f'<div class="c-status" role="cell">{SEP.join(parts)}{tag}</div>'
 
@@ -274,7 +284,8 @@ def initiative_row(
         status_cell(initiative, now),
         actions_cell(initiative),
     ]
-    return f'<div class="init" role="row">{"".join(cells)}</div>'
+    css_class = "init is-finished" if initiative.finished else "init"
+    return f'<div class="{css_class}" role="row">{"".join(cells)}</div>'
 
 
 COLUMN_HEADS = ["Initiative", "Worktree", "Last activity", "Status", "Actions"]
@@ -287,6 +298,14 @@ def header_row() -> str:
         text = f'<span class="sr-only">{head}</span>' if head == "Actions" else head
         cells.append(f'<div role="columnheader">{text}</div>')
     return f'<div class="col-head" role="row">{"".join(cells)}</div>'
+
+
+def by_activity(initiatives: list[Initiative]) -> list[Initiative]:
+    """Newest last activity first, then those without activity.
+    Sorting is stable, so ties keep their incoming (slug) order."""
+    active = [i for i in initiatives if i.activity is not None]
+    quiet = [i for i in initiatives if i.activity is None]
+    return sorted(active, key=lambda i: i.activity.when, reverse=True) + quiet
 
 
 def newest_index(initiatives: list[Initiative]) -> int | None:
@@ -371,6 +390,14 @@ code { font-family: var(--mono); font-size: 12px; }
 .done-n { color: var(--ink-muted); }
 .err { color: var(--ink-2); }
 .when.is-stale { color: var(--stale); }
+.is-finished, .is-finished .what, .is-finished .wait { color: var(--ink-muted); }
+
+/* Empty states and the Show finished link */
+.empty { padding: 16px 0; color: var(--ink-2); }
+.show-finished { margin-top: 18px; padding: 0; background: none; border: 0;
+                 font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.show-finished:hover { text-decoration: underline; }
+#finished { margin-top: 8px; }
 
 /* Actions */
 .c-btns { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
@@ -410,9 +437,8 @@ form.switch { margin: 0; }
 # counts as saved. Storage can throw (blocked, private mode): ignore it.
 SCRIPT = """
 (function () {
-  var grid = document.getElementById("initiatives");
-  var key = grid.getAttribute("data-storage-key");
-  var toggles = Array.prototype.slice.call(grid.querySelectorAll("button.toggle"));
+  var key = document.querySelector("[data-storage-key]").getAttribute("data-storage-key");
+  var toggles = Array.prototype.slice.call(document.querySelectorAll("button.toggle"));
 
   function isOpen(button) {
     return button.getAttribute("aria-expanded") === "true";
@@ -434,8 +460,12 @@ SCRIPT = """
       if (Array.isArray(value)) saved = value;
     }
   } catch (e) {}
+  // Finished rows always start closed.
   if (saved !== null) {
-    toggles.forEach(function (b) { setOpen(b, saved.indexOf(b.dataset.slug) !== -1); });
+    toggles.forEach(function (b) {
+      var finished = b.closest(".is-finished") !== null;
+      setOpen(b, !finished && saved.indexOf(b.dataset.slug) !== -1);
+    });
   }
 
   toggles.forEach(function (button) {
@@ -452,8 +482,58 @@ SCRIPT = """
       button.click();
     });
   });
+
+  // Show finished (n) <-> Hide finished. Not remembered.
+  var more = document.getElementById("show-finished");
+  if (more) {
+    var label = more.textContent;
+    more.addEventListener("click", function () {
+      var open = !isOpen(more);
+      setOpen(more, open);
+      more.textContent = open ? "Hide finished" : label;
+    });
+  }
 })();
 """
+
+
+def page_content(initiatives: list[Initiative], root_text: str, now: datetime) -> str:
+    """Unfinished rows in the table, finished ones behind Show finished (n).
+    `initiatives` come sorted; `root_text` is already escaped."""
+    if not initiatives:
+        return f'<p class="empty">No initiatives in <code>{root_text}/_bmad-output/</code>.</p>'
+
+    current = [i for i in initiatives if not i.finished]
+    finished = [i for i in initiatives if i.finished]
+    open_index = newest_index(current)
+    if current:
+        rows = "\n".join(
+            initiative_row(initiative, index, index == open_index, now)
+            for index, initiative in enumerate(current)
+        )
+        parts = [
+            '<div id="initiatives" role="table" aria-label="Initiatives">'
+            f"\n{header_row()}\n{rows}\n</div>"
+        ]
+    else:
+        parts = ['<p class="empty">Nothing in progress.</p>']
+
+    if finished:
+        # Panel ids continue after the current rows so they stay unique.
+        rows = "\n".join(
+            initiative_row(initiative, len(current) + index, False, now)
+            for index, initiative in enumerate(finished)
+        )
+        parts.append(
+            '<button type="button" class="show-finished" id="show-finished"'
+            f' aria-expanded="false" aria-controls="finished">'
+            f"Show finished ({len(finished)})</button>"
+        )
+        parts.append(
+            '<div id="finished" role="table" aria-label="Finished initiatives" hidden>'
+            f"\n{header_row()}\n{rows}\n</div>"
+        )
+    return "\n".join(parts)
 
 
 def render_page(
@@ -461,12 +541,8 @@ def render_page(
 ) -> str:
     if now is None:
         now = datetime.now()
-    open_index = newest_index(initiatives)
-    rows = "\n".join(
-        initiative_row(initiative, index, index == open_index, now)
-        for index, initiative in enumerate(initiatives)
-    )
     root_text = escape(display_path(root))
+    content = page_content(by_activity(initiatives), root_text, now)
     storage_key = escape("bmad-dash:open:" + str(root))
     return f"""<!doctype html>
 <html lang="en">
@@ -477,12 +553,9 @@ def render_page(
 <style>{STYLE}</style>
 </head>
 <body>
-<main class="page">
+<main class="page" data-storage-key="{storage_key}">
 <header class="hdr"><h1>Initiatives</h1><span class="path">{root_text}</span></header>
-<div id="initiatives" role="table" aria-label="Initiatives" data-storage-key="{storage_key}">
-{header_row()}
-{rows}
-</div>
+{content}
 <script>{SCRIPT}</script>
 </main>
 </body>

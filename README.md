@@ -20,7 +20,10 @@ Each row shows last activity and a Status sentence: what is waiting (ticket
 counts by status, `forge open`, `spec to slice`) and tickets done/total, from
 the project's `_bmad/method/scripts/tickets.py status` (run with `uv`). When
 that call fails the Status cell says "Couldn't read tickets: tickets.py
-failed". Items untouched for 14 days are stale.
+failed". Items untouched for 14 days are stale. Rows are sorted newest
+activity first. Initiatives whose file has `status: done` or `dropped` sit
+behind "Show finished (n)"; one with nothing open and no such status says
+`confirm close or add work`.
 Expand a row to see its forges, specs and epics.
 
 `/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`

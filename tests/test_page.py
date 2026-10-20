@@ -38,7 +38,7 @@ def test_one_row_per_initiative_plus_header():
 
 
 def test_five_column_heads():
-    html = render([])
+    html = render([Initiative("initiative-a", "A", [])])
     heads = re.findall(r'<div role="columnheader">(.*?)</div>', html)
     texts = [re.sub(r"<[^>]+>", "", h) for h in heads]
     assert texts == ["Initiative", "Worktree", "Last activity", "Status", "Actions"]
@@ -230,9 +230,9 @@ def test_only_newest_activity_row_starts_open():
     html = grid(render([old, new, none]))
     assert html.count('aria-expanded="true"') == 1
     assert html.count('aria-expanded="false"') == 2
-    assert re.search(r'aria-expanded="true" aria-controls="panel-1" data-slug="new"', html)
+    assert re.search(r'aria-expanded="true" aria-controls="panel-0" data-slug="new"', html)
     assert html.count(" hidden>") == 2
-    assert '<div class="panel" role="cell" id="panel-1">' in html
+    assert '<div class="panel" role="cell" id="panel-0">' in html
 
 
 def test_newest_row_with_a_tree_opens_when_newest_has_none():
@@ -253,6 +253,7 @@ def test_nothing_open_without_activity():
 
 def test_storage_key_is_per_project_root():
     html = render([], Path("/some/project"))
+    assert '<main class="page" data-storage-key=' in html
     assert 'data-storage-key="bmad-dash:open:/some/project"' in html
 
 
@@ -353,9 +354,100 @@ def test_status_overflow_collapses_to_plus_n():
     assert '<span class="wait">+2</span>' in html
 
 
-def test_status_all_dropped_shows_no_done_count():
+def test_status_all_dropped_asks_to_confirm_close_without_done_count():
     html = render([finished_tree(signals_initiative([{"state": "dropped"}]))])
-    assert cell(html, "c-status") == ""
+    assert status_text(html) == "confirm close or add work"
+
+
+def test_nothing_open_without_status_asks_to_confirm_close():
+    tickets = [{"state": "done"}] * 4
+    html = render([finished_tree(signals_initiative(tickets))])
+    assert cell(html, "c-status") == (
+        '<span class="wait">confirm close or add work</span><span class="sep">·</span>'
+        '<span class="done-n">4/4 done</span>'
+    )
+    assert "show-finished" not in markup(html)
+
+
+def test_no_confirm_cue_when_tickets_unavailable():
+    html = render([finished_tree(signals_initiative(None))])
+    assert "confirm close" not in html
+
+
+# --- sort, finished, empty states ---
+
+def at(slug: str, hours_ago: float | None, status: str = "") -> Initiative:
+    initiative = Initiative(slug, slug.upper(), [], tickets=[], status=status)
+    if hours_ago is not None:
+        initiative.activity = Activity(NOW - timedelta(hours=hours_ago), "", "plan")
+    return initiative
+
+
+def markup(html: str) -> str:
+    """The page without its CSS and script."""
+    html = re.sub(r"<style>.*?</style>", "", html, flags=re.S)
+    return re.sub(r"<script>.*?</script>", "", html, flags=re.S)
+
+
+def slugs_in(html: str) -> list[str]:
+    return re.findall(r'<span class="slug">(.*?)</span>', html)
+
+
+def test_rows_sort_newest_activity_first_without_activity_last():
+    html = render([at("a", None), at("b", 5), at("c", 1), at("d", 5)])
+    assert slugs_in(html) == ["c", "b", "d", "a"]  # ties keep their order
+
+
+def test_finished_initiatives_hide_behind_show_finished():
+    html = render([at("live", 2), at("closed", 1, "done"), at("gone", 3, "dropped")])
+    table, _, rest = html.partition('<button type="button" class="show-finished"')
+    assert slugs_in(table) == ["live"]
+    assert 'aria-expanded="false" aria-controls="finished">Show finished (2)</button>' in rest
+    assert '<div id="finished" role="table" aria-label="Finished initiatives" hidden>' in rest
+    assert slugs_in(rest) == ["closed", "gone"]
+    assert rest.count('<div class="init is-finished" role="row">') == 2
+    assert '<div class="c-status" role="cell"><span class="done-n">done</span></div>' in rest
+    assert '"Hide finished"' in html  # the script swaps the label
+
+
+def test_finished_row_is_never_stale_and_ignores_tickets_failure():
+    closed = at("closed", 24 * 30, "dropped")
+    closed.tickets = None
+    html = markup(render([closed]))
+    assert '<div class="c-status" role="cell"><span class="done-n">dropped</span></div>' in html
+    assert "stale" not in html
+
+
+def test_finished_row_keeps_done_count():
+    closed = at("closed", 1, "done")
+    closed.tickets = [{"state": "done"}, {"state": "dropped"}]
+    assert status_text(render([closed])) == "done·1/1 done"
+
+
+def test_script_keeps_finished_rows_closed_on_restore():
+    assert 'closest(".is-finished")' in render([])
+
+
+def test_finished_row_never_starts_open():
+    closed = tree_initiative(slug="closed")
+    closed.status = "done"
+    closed.activity = Activity(NOW, "", "plan")
+    html = render([closed])
+    assert 'aria-expanded="true"' not in markup(html)
+
+
+def test_all_finished_says_nothing_in_progress():
+    html = render([at("closed", 1, "done")])
+    assert '<p class="empty">Nothing in progress.</p>' in html
+    assert 'id="initiatives"' not in html
+    assert "Show finished (1)" in html
+
+
+def test_no_initiatives_says_so_with_root():
+    html = markup(render([], Path("/some/project")))
+    assert ('<p class="empty">No initiatives in <code>/some/project/_bmad-output/</code>.</p>'
+            in html)
+    assert 'role="table"' not in html and "show-finished" not in html
 
 
 def test_status_tickets_unavailable_keeps_rest_of_row():

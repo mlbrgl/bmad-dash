@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from conftest import write_initiative
+
 from bmad_dash.initiatives import Worktree, active_initiative, list_initiatives
 
 
@@ -48,3 +50,14 @@ def test_titles_fall_back_to_folder_name(project):
     assert initiatives["initiative-shared"].title == "Shared <b>&</b> one"
     assert initiatives["initiative-untitled"].title == "initiative-untitled"
     assert initiatives["initiative-nofile"].title == "initiative-nofile"
+
+
+def test_status_read_from_initiative_frontmatter(project):
+    write_initiative(project, "initiative-closed", "---\ntitle: C\nstatus: done\n---\n")
+    write_initiative(project, "initiative-gone", "---\nstatus: 'dropped'\n---\n")
+    initiatives = by_slug(project)
+    assert initiatives["initiative-closed"].finished
+    assert initiatives["initiative-gone"].status == "dropped"
+    assert initiatives["initiative-gone"].finished
+    assert initiatives["initiative-matched"].status == ""
+    assert not initiatives["initiative-nofile"].finished
