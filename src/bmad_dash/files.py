@@ -62,7 +62,33 @@ th, td { text-align: left; vertical-align: top; padding: 0.3rem 0.8rem;
 pre { background: #f5f5f5; padding: 0.8rem; overflow-x: auto; }
 pre.frontmatter { border-left: 3px solid #bbb; }
 code { font-size: 0.9em; }
+a.back { color: #52525B; text-decoration: none; }
+a.back:hover { text-decoration: underline; }
 """
+
+BACK_LINK = '<p><a class="back" href="/">&larr; Initiatives</a></p>'
+
+
+def html_page(title: str, body: str) -> str:
+    """A full HTML page with the back link on top. `title` must be escaped."""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{title}</title>
+<style>{STYLE}</style>
+</head>
+<body>
+{BACK_LINK}
+{body}
+</body>
+</html>
+"""
+
+
+def not_found_page() -> str:
+    """The plain 404 page for a missing or refused file."""
+    return html_page("Not found", "<h1>Not found</h1>\n<p>No such file in _bmad-output/.</p>")
 
 
 def render_markdown(path: Path) -> str:
@@ -74,18 +100,4 @@ def render_markdown(path: Path) -> str:
         if frontmatter is not None
         else ""
     )
-    title = escape(path.name)
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>{title}</title>
-<style>{STYLE}</style>
-</head>
-<body>
-<p><a href="/">&larr; Dashboard</a></p>
-{frontmatter_html}
-{body_html}
-</body>
-</html>
-"""
+    return html_page(escape(path.name), f"{frontmatter_html}\n{body_html}")

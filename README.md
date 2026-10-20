@@ -27,7 +27,9 @@ behind "Show finished (n)"; one with nothing open and no such status says
 Expand a row to see its forges, specs and epics.
 
 `/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
-relative to `_bmad-output/`; anything outside it is refused (403). Served files
+relative to `_bmad-output/`. Rendered `.md` pages get a `← Initiatives` back
+link; a missing path or one outside `_bmad-output/` gets a plain 404 page with
+the same link. Served files
 are sandboxed, so they can't trigger the switch button.
 
 The **switch** button on a worktree runs `code -n <worktree>`, so the `code`

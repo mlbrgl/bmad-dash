@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from bmad_dash.files import NotFound, Refused, render_markdown, resolve_file
+from bmad_dash.files import NotFound, Refused, not_found_page, render_markdown, resolve_file
 from bmad_dash.initiatives import list_initiatives, list_worktrees, worktree_id
 from bmad_dash.page import render_page
 
@@ -124,11 +124,10 @@ def make_server(
         def serve_file(self, rel: str):
             try:
                 target = resolve_file(root, rel)
-            except Refused:
-                self.send_error(403)
-                return
-            except NotFound:
-                self.send_error(404)
+            except (Refused, NotFound):
+                # Outside paths get the same 404 as missing ones: no hint
+                # about what exists beyond _bmad-output/.
+                self.send_html(not_found_page().encode("utf-8"), status=404)
                 return
             if target.suffix == ".md":
                 body = render_markdown(target).encode("utf-8")
@@ -139,8 +138,13 @@ def make_server(
             # `Origin: null` and are refused.
             self.send_html(body, {"Content-Security-Policy": "sandbox allow-scripts"})
 
-        def send_html(self, body: bytes, extra_headers: dict[str, str] | None = None):
-            self.send_response(200)
+        def send_html(
+            self,
+            body: bytes,
+            extra_headers: dict[str, str] | None = None,
+            status: int = 200,
+        ):
+            self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             for name, value in (extra_headers or {}).items():
                 self.send_header(name, value)

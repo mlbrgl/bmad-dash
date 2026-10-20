@@ -7,7 +7,7 @@ def test_markdown_resolves_and_renders(files_project):
     path = resolve_file(files_project, "initiative-x/spec-x/spec-x.md")
     html = render_markdown(path)
     assert "<title>spec-x.md</title>" in html
-    assert '<a href="/">' in html
+    assert '<a class="back" href="/">&larr; Initiatives</a>' in html
     assert "<h1>Spec heading</h1>" in html
     assert "<table>" in html and "<td>one</td>" in html
     assert '<code class="language-python">' in html
