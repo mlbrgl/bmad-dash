@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.signals import open_items, ticket_counts
-from bmad_dash.tree import TreeItem
+from bmad_dash.tree import STALE, Ticket, TreeItem
 
 
 def display_path(path: Path) -> str:
@@ -40,52 +40,91 @@ def relative_time(when: datetime, now: datetime) -> str:
     return "1 day ago" if days == 1 else f"{days} days ago"
 
 
-# --- tree (story 8 replaces these) ---
+# --- tree panel ---
+# Its own grid: kind · name · status · updated. Nesting indents the name only.
 
-def badge(state: str) -> str:
-    """A coloured state label. `state` comes from our rules or from tickets.py."""
-    css_class = "badge-" + "".join(c for c in state if c.isalnum() or c == "-")
-    return f'<span class="badge {css_class}">{escape(state)}</span>'
-
-
-def item_name(item: TreeItem) -> str:
-    """The folder name, linked to its main file when there is one."""
-    name = f"<code>{escape(item.name)}</code>"
-    if item.path is None:
-        return name
-    href = "/file/" + quote(item.path)
-    return f'<a href="{escape(href)}">{name}</a>'
+def file_link(path: str, text: str, css_class: str) -> str:
+    href = escape("/file/" + quote(path))
+    return f'<a class="{css_class}" href="{href}">{escape(text)}</a>'
 
 
-def ticket_line(ticket: dict) -> str:
-    ref = escape(str(ticket.get("ref", "")))
-    title = escape(str(ticket.get("title", "")))
-    state = str(ticket.get("state", ""))
-    return f"<li>{ref} {title} {badge(state)}</li>"
+def name_cell(name: str, path: str | None, depth: int, report: str | None = None) -> str:
+    """The name, linked to its file when there is one. Forges may add a `report` link."""
+    if path is None:
+        inner = f'<span class="name-text">{escape(name)}</span>'
+    else:
+        inner = file_link(path, name, "name-link")
+    if report is not None:
+        inner += file_link(report, "report", "report-link")
+    return f'<span role="cell" class="t-name d{depth}">{inner}</span>'
 
 
-def tree_item_html(item: TreeItem) -> str:
-    parts = [escape(item.kind), item_name(item), badge(item.state)]
-    if item.kind == "epic":
-        if item.done is None or item.total is None:
-            parts.append("?/?")
-        else:
-            parts.append(f"{item.done}/{item.total}")
-    if item.updated is not None:
-        parts.append(f'<span class="updated">{item.updated:%Y-%m-%d}</span>')
-
-    nested = [tree_item_html(child) for child in item.children]
-    nested += [ticket_line(t) for t in item.tickets]
-    inner = f"<ul>{''.join(nested)}</ul>" if nested else ""
-    return f"<li>{' '.join(parts)}{inner}</li>"
+def word_cell(word: str) -> str:
+    """One status word: done and dropped muted, anything else pending (accent)."""
+    if not word:
+        return '<span role="cell"></span>'
+    css_class = "st-done" if word in ("done", "dropped") else "st-pending"
+    return f'<span role="cell" class="{css_class}">{escape(word)}</span>'
 
 
-def panel_content(initiative: Initiative) -> str:
+def updated_cell(updated: datetime | None, stale: bool, now: datetime) -> str:
+    if updated is None:
+        return '<span role="cell" class="upd"></span>'
+    tag = '<span class="stale-tag">stale</span>' if stale else ""
+    return (
+        f'<span role="cell" class="upd" title="{updated:%Y-%m-%d %H:%M}">'
+        f'<span class="upd-time">{relative_time(updated, now)}</span>{tag}</span>'
+    )
+
+
+def tree_row(kind: str, name: str, word: str, updated: str) -> str:
+    return (
+        f'<div class="t-row" role="row"><span role="cell" class="t-kind">'
+        f"{escape(kind)}</span>{name}{word}{updated}</div>"
+    )
+
+
+def ticket_row(ticket: Ticket, depth: int, now: datetime) -> str:
+    return tree_row(
+        ticket.ref,
+        name_cell(ticket.title, ticket.path, depth),
+        word_cell(ticket.word),
+        updated_cell(ticket.updated, ticket.stale, now),
+    )
+
+
+def item_rows(item: TreeItem, depth: int, now: datetime) -> list[str]:
+    """The item's row, then its children's, then its tickets'.
+
+    An epic with exactly one spec nests its tickets under that spec.
+    """
+    rows = [tree_row(
+        item.kind,
+        name_cell(item.name, item.path, depth, item.report),
+        word_cell(item.word),
+        updated_cell(item.updated, item.state == STALE, now),
+    )]
+    for child in item.children:
+        rows += item_rows(child, depth + 1, now)
+    specs = [child for child in item.children if child.kind == "spec"]
+    ticket_depth = depth + 2 if len(specs) == 1 else depth + 1
+    rows += [ticket_row(t, ticket_depth, now) for t in item.tickets]
+    return rows
+
+
+TREE_HEADS = ["kind", "name", "status", "updated"]
+
+
+def panel_content(initiative: Initiative, now: datetime) -> str:
     note = ""
     if initiative.tickets is None:
-        note = '<p class="muted">tickets unavailable</p>'
-    items = "".join(tree_item_html(item) for item in initiative.tree)
-    return f'{note}<ul class="tree">{items}</ul>'
+        note = '<p class="muted t-note">tickets unavailable</p>'
+    heads = "".join(f'<span role="columnheader">{h}</span>' for h in TREE_HEADS)
+    rows = [f'<div class="t-row t-head" role="row">{heads}</div>']
+    for item in initiative.tree:
+        rows += item_rows(item, 0, now)
+    label = escape(f"{initiative.title} contents")
+    return f'{note}<div class="tree" role="table" aria-label="{label}">{"".join(rows)}</div>'
 
 
 # --- row cells ---
@@ -108,11 +147,13 @@ def initiative_cell(initiative: Initiative, panel_id: str, is_open: bool) -> str
     )
 
 
-def panel_cell(initiative: Initiative, panel_id: str, is_open: bool) -> str:
+def panel_cell(
+    initiative: Initiative, panel_id: str, is_open: bool, now: datetime
+) -> str:
     hidden = "" if is_open else " hidden"
     return (
         f'<div class="panel" role="cell" id="{panel_id}"{hidden}>'
-        f"{panel_content(initiative)}</div>"
+        f"{panel_content(initiative, now)}</div>"
     )
 
 
@@ -187,7 +228,7 @@ def initiative_row(
     is_open = is_open and bool(initiative.tree)
     cells = [initiative_cell(initiative, panel_id, is_open)]
     if initiative.tree:
-        cells.append(panel_cell(initiative, panel_id, is_open))
+        cells.append(panel_cell(initiative, panel_id, is_open, now))
     cells += [
         worktree_cell(initiative),
         activity_cell(initiative, now),
@@ -229,6 +270,7 @@ STYLE = """
   --accent: #2563EB; --accent-fg: #FFFFFF; --accent-soft: #EFF4FF;
   --stale: #A34A06; --stale-soft: #FEF6E7;
   --cols: minmax(0, 2.4fr) 170px minmax(0, 1.8fr) minmax(0, 2.2fr) 150px;
+  --tcols: 64px minmax(0, 1fr) 120px 110px;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -294,19 +336,31 @@ form.switch { margin: 0; }
        border-radius: 6px; white-space: nowrap; cursor: pointer;
        background: transparent; border: 1px solid var(--line); color: var(--ink); }
 
-/* Tree panel (story 8 replaces the content) */
+/* Tree panel: its own grid, same for every row. */
 .panel { margin-top: 16px; padding: 8px 16px; background: var(--panel);
          border-radius: 8px; font-size: 13px; cursor: auto; }
 .panel[hidden] { display: none; }
-.tree, .tree ul { list-style: none; }
-.tree ul { padding-left: 20px; }
-.tree li { padding: 3px 0; }
-.updated { color: var(--ink-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.badge { font-size: 12px; color: var(--ink-muted); }
-.badge-open, .badge-in-progress, .badge-review, .badge-planned,
-.badge-backlog { color: var(--accent); }
-.badge-stale { font-size: 11px; font-weight: 600; color: var(--stale);
-               background: var(--stale-soft); padding: 1px 6px; border-radius: 4px; }
+.t-note { font-size: 12px; padding: 4px 0 6px; }
+.t-row { display: grid; grid-template-columns: var(--tcols); column-gap: 16px;
+         align-items: baseline; padding: 6px 0; }
+.t-head { font-size: 12px; color: var(--ink-muted); border-bottom: 1px solid var(--line);
+          padding-bottom: 6px; margin-bottom: 2px; }
+.t-kind { font: 12px var(--mono); color: var(--ink-muted); min-width: 0; overflow: hidden;
+          text-overflow: ellipsis; white-space: nowrap; }
+/* Only the name truncates; the report link stays visible. */
+.t-name { display: flex; align-items: baseline; min-width: 0; }
+.name-link, .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                         white-space: nowrap; }
+.d1 { padding-left: 20px; } .d2 { padding-left: 40px; } .d3 { padding-left: 60px; }
+.name-link { color: var(--ink); }
+.report-link { flex: none; color: var(--ink-muted); margin-left: 8px; font-size: 12px; }
+.st-pending { color: var(--accent); }
+.st-done { color: var(--ink-muted); }
+/* The time never breaks; the stale tag wraps below it when the column is too narrow. */
+.upd { font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.upd-time { white-space: nowrap; }
+.stale-tag { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; color: var(--stale);
+             background: var(--stale-soft); padding: 1px 6px; border-radius: 4px; }
 """
 
 # Opens and closes panels; saves open slugs as a JSON list. An empty list

@@ -130,7 +130,8 @@ def test_epic_all_done_is_finished(initiative):
     item = only(build_tree(initiative, tickets, NOW))
     assert item.state == FINISHED
     assert (item.done, item.total) == (2, 2)
-    assert [t["ref"] for t in item.tickets] == ["1.1", "1.2"]
+    assert [t.ref for t in item.tickets] == ["1.1", "1.2"]
+    assert item.word == "done"
 
 
 def test_epic_partly_done_skips_dropped(initiative):
@@ -139,6 +140,8 @@ def test_epic_partly_done_skips_dropped(initiative):
     item = only(build_tree(initiative, tickets, NOW))
     assert item.state == OPEN
     assert (item.done, item.total) == (1, 2)
+    assert item.word == "in progress"
+    assert [t.word for t in item.tickets] == ["done", "dropped", "review"]
 
 
 def test_epic_without_tickets_is_open_zero_of_zero(initiative):
@@ -146,6 +149,12 @@ def test_epic_without_tickets_is_open_zero_of_zero(initiative):
     item = only(build_tree(initiative, [], NOW))
     assert item.state == OPEN
     assert (item.done, item.total) == (0, 0)
+    assert item.word == ""
+
+
+def test_epic_with_only_dropped_tickets_has_no_word(initiative):
+    make_folder(initiative, "epic-x")
+    assert only(build_tree(initiative, [ticket("1.1", "dropped")], NOW)).word == ""
 
 
 def test_open_epic_uses_file_mtime_for_staleness(initiative):
@@ -161,6 +170,87 @@ def test_epic_counts_unknown_when_tickets_unavailable(initiative):
     item = only(build_tree(initiative, None, NOW))
     assert (item.done, item.total) == (None, None)
     assert item.state == OPEN
+    assert item.word == "" and item.tickets == []
+
+
+# --- tickets ---
+
+
+def write_plan(folder: Path, name: str, ticket_value: str, when: datetime) -> Path:
+    plan = folder / name
+    plan.write_text(f"---\ntitle: x\nticket: {ticket_value}\n---\n# Plan\n")
+    os.utime(plan, (when.timestamp(), when.timestamp()))
+    return plan
+
+
+def epic_ticket(folder: Path, raw: dict):
+    return only(only(build_tree(folder.parent, [raw], NOW)).tickets)
+
+
+def test_ticket_links_its_plan_by_id(initiative):
+    epic = make_folder(initiative, "epic-x")
+    write_plan(epic, "story-other-plan.md", "'4'", NOW)
+    write_plan(epic, "story-y-plan.md", "'3'", NOW - timedelta(days=2))
+    t = epic_ticket(epic, {**ticket("1.3", "in-progress"), "id": 3})
+    assert t.path == "initiative-x/epic-x/story-y-plan.md"
+    assert t.updated == NOW - timedelta(days=2)
+    assert t.word == "in progress"
+    assert t.stale is False
+
+
+def test_ticket_links_its_plan_by_leaf_stem(initiative):
+    epic = make_folder(initiative, "epic-x")
+    write_plan(epic, "story-y-plan.md", "story-y", NOW)
+    t = epic_ticket(epic, {**ticket("1.3", "review"), "id": None, "file": "story-y.md"})
+    assert t.path == "initiative-x/epic-x/story-y-plan.md"
+
+
+def test_ticket_without_plan_uses_leaf_file(initiative):
+    epic = make_folder(initiative, "epic-x")
+    leaf = epic / "story-y.md"
+    leaf.write_text("---\nid: 3\n---\n")
+    os.utime(leaf, ((NOW - timedelta(days=3)).timestamp(),) * 2)
+    t = epic_ticket(epic, {**ticket("1.3", "planned"), "id": 3, "file": "story-y.md"})
+    assert t.path == "initiative-x/epic-x/story-y.md"
+    assert t.updated == NOW - timedelta(days=3)
+
+
+def test_ticket_without_files_uses_tickets_toml_mtime(initiative):
+    epic = make_folder(initiative, "epic-x")
+    toml = epic / "tickets.toml"
+    toml.write_text("")
+    os.utime(toml, ((NOW - timedelta(days=5)).timestamp(),) * 2)
+    t = epic_ticket(epic, {**ticket("1.3", "planned"), "id": 3, "file": None})
+    assert t.path is None
+    assert t.title == "Ticket 1.3"
+    assert t.updated == NOW - timedelta(days=5)
+
+
+def test_ticket_without_any_file_has_no_updated(initiative):
+    epic = make_folder(initiative, "epic-x")
+    t = epic_ticket(epic, {**ticket("1.3", "planned"), "id": 3})
+    assert (t.path, t.updated, t.stale) == (None, None, False)
+
+
+def test_ticket_with_null_ref_has_empty_ref(initiative):
+    epic = make_folder(initiative, "epic-x")
+    t = epic_ticket(epic, {**ticket("1.3", "planned"), "ref": None})
+    assert t.ref == ""
+
+
+@pytest.mark.parametrize("state, stale", [
+    ("review", True), ("planned", True), ("done", False), ("dropped", False),
+])
+def test_ticket_stale_after_14_days_unless_done_or_dropped(initiative, state, stale):
+    epic = make_folder(initiative, "epic-x")
+    write_plan(epic, "story-y-plan.md", "'3'", NOW - timedelta(days=30))
+    assert epic_ticket(epic, {**ticket("1.3", state), "id": 3}).stale is stale
+
+
+def test_ticket_fresh_is_not_stale(initiative):
+    epic = make_folder(initiative, "epic-x")
+    write_plan(epic, "story-y-plan.md", "'3'", NOW - timedelta(days=13))
+    assert epic_ticket(epic, {**ticket("1.3", "review"), "id": 3}).stale is False
 
 
 # --- updated time fallbacks ---
@@ -177,6 +267,14 @@ def test_missing_or_bad_updated_falls_back_to_newest_mtime(initiative, memlog):
 def test_read_memlog_accepts_a_plain_date(tmp_path):
     (tmp_path / ".memlog.md").write_text("---\nstatus: complete\nupdated: 2026-10-01\n---\n")
     assert read_memlog(tmp_path) == ("complete", datetime(2026, 10, 1))
+
+
+def test_forge_report_link(initiative):
+    forge = make_folder(initiative, "forge-x", f"updated: {ago(1)}\n")
+    (forge / "forge-report.html").write_text("<html></html>")
+    make_folder(initiative, "forge-y", f"updated: {ago(1)}\n")
+    reports = [i.report for i in build_tree(initiative, [], NOW)]
+    assert reports == ["initiative-x/forge-x/forge-report.html", None]
 
 
 def test_read_memlog_ignores_bullets(tmp_path):
@@ -245,4 +343,3 @@ def test_failing_tickets_py_shows_unavailable_on_page(tmp_path):
 
     html = render_page(list_initiatives(root, now=NOW), root)
     assert "tickets unavailable" in html
-    assert "?/?" in html

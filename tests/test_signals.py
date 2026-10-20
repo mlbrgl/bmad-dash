@@ -8,7 +8,7 @@ import pytest
 
 from bmad_dash.initiatives import Worktree, list_initiatives
 from bmad_dash.signals import last_activity, open_items, ticket_counts
-from bmad_dash.tree import FINISHED, OPEN, STALE, TreeItem
+from bmad_dash.tree import FINISHED, OPEN, STALE, Ticket, TreeItem
 
 T_OLD = datetime(2026, 10, 1, 9, 0)
 T_MID = datetime(2026, 10, 5, 9, 0)
@@ -158,7 +158,7 @@ def test_open_items_counts_open_at_any_depth():
 
 def test_open_items_ignores_stale_and_finished_and_tickets():
     epic = item("epic", FINISHED, [item("spec", STALE)])
-    epic.tickets = [{"ref": "1.1", "state": "review"}]
+    epic.tickets = [Ticket("1.1", "T", "review", None, None, False)]
     assert open_items([epic]) == 0
 
 

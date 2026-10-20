@@ -5,7 +5,7 @@ from pathlib import Path
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.page import relative_time, render_page
 from bmad_dash.signals import Activity
-from bmad_dash.tree import TreeItem
+from bmad_dash.tree import Ticket, TreeItem
 
 NOW = datetime(2026, 10, 19, 12, 0)
 
@@ -75,20 +75,79 @@ def tree_initiative(tickets: list[dict] | None = [], slug="initiative-a") -> Ini
     spec = TreeItem("spec", "spec-<b>", "initiative-a/epic-a/spec-<b>/spec-<b>.md",
                     datetime(2026, 10, 1), "finished")
     epic = TreeItem("epic", "epic-a", "initiative-a/epic-a/epic-a.md",
-                    datetime(2026, 10, 2), "open", children=[spec],
-                    tickets=[{"ref": "1.1", "title": "<i>T</i>", "state": "review"}],
-                    done=0, total=1)
+                    NOW - timedelta(minutes=27), "open", children=[spec],
+                    tickets=[Ticket("1.1", "<i>T</i>", "in progress",
+                                    "initiative-a/epic-a/story-t-plan.md",
+                                    NOW - timedelta(days=20), True),
+                             Ticket("1.2", "Old", "done", None,
+                                    NOW - timedelta(days=30), False)],
+                    done=1, total=2, word="in progress")
     forge = TreeItem("forge", "forge-a", None, None, "stale")
     return Initiative(slug, "A", [], tickets=tickets, tree=[forge, epic])
 
 
-def test_tree_renders_items_counts_and_tickets():
+def rows_of(html: str) -> list[str]:
+    """Each tree row's markup, header first."""
+    return re.findall(r'<div class="t-row[^"]*" role="row">(.*?)</div>', html)
+
+
+def test_tree_is_a_table_with_header_row():
     html = render([tree_initiative()])
-    assert "0/1" in html
-    assert "1.1" in html
-    assert 'badge-stale' in html and 'badge-review' in html
-    assert "2026-10-02" in html
-    assert "tickets unavailable" not in html
+    assert '<div class="tree" role="table" aria-label="A contents">' in html
+    header = rows_of(html)[0]
+    heads = re.findall(r'<span role="columnheader">(.*?)</span>', header)
+    assert heads == ["kind", "name", "status", "updated"]
+
+
+def test_every_tree_row_has_four_cells():
+    rows = rows_of(render([tree_initiative()]))
+    assert len(rows) == 1 + 5  # header, forge, epic, spec, two tickets
+    for row in rows:
+        assert row.count('role="cell"') + row.count('role="columnheader"') == 4
+
+
+def test_tree_row_order_kinds_and_indent():
+    rows = rows_of(render([tree_initiative()]))[1:]
+    kinds = [re.search(r'class="t-kind">(.*?)</span>', r).group(1) for r in rows]
+    depths = [re.search(r'class="t-name (d\d)"', r).group(1) for r in rows]
+    assert kinds == ["forge", "epic", "spec", "1.1", "1.2"]
+    # One spec in the epic: tickets nest under it.
+    assert depths == ["d0", "d0", "d1", "d2", "d2"]
+
+
+def test_tickets_sit_under_epic_without_a_single_spec():
+    initiative = tree_initiative()
+    initiative.tree[1].children = []
+    rows = rows_of(render([initiative]))[1:]
+    depths = [re.search(r'class="t-name (d\d)"', r).group(1) for r in rows]
+    assert depths == ["d0", "d0", "d1", "d1"]
+
+
+def test_status_words_and_empty_doc_status():
+    rows = rows_of(render([tree_initiative()]))[1:]
+    forge, epic, spec, pending, done = rows
+    assert '<span role="cell"></span>' in forge
+    assert '<span role="cell"></span>' in spec
+    assert '<span role="cell" class="st-pending">in progress</span>' in epic
+    assert '<span role="cell" class="st-pending">in progress</span>' in pending
+    assert '<span role="cell" class="st-done">done</span>' in done
+
+
+def test_updated_is_relative_with_exact_title_and_stale_tag():
+    rows = rows_of(render([tree_initiative()]))[1:]
+    forge, epic, spec, pending, done = rows
+    assert '<span role="cell" class="upd"></span>' in forge  # unknown: empty, no tag
+    assert "27 min ago" in epic and "stale-tag" not in epic
+    assert ('title="2026-09-29 12:00"><span class="upd-time">20 days ago</span>'
+            '<span class="stale-tag">stale</span>') in pending
+    assert "30 days ago" in done and "stale-tag" not in done
+
+
+def test_stale_doc_shows_stale_tag():
+    initiative = tree_initiative()
+    initiative.tree[0] = TreeItem("forge", "forge-a", None, NOW - timedelta(days=20), "stale")
+    forge = rows_of(render([initiative]))[1]
+    assert '20 days ago</span><span class="stale-tag">stale</span>' in forge
 
 
 def test_tree_escapes_names_and_quotes_links():
@@ -97,15 +156,45 @@ def test_tree_escapes_names_and_quotes_links():
     assert "spec-&lt;b&gt;" in html
     assert 'href="/file/initiative-a/epic-a/spec-%3Cb%3E/spec-%3Cb%3E.md"' in html
     assert 'href="/file/initiative-a/epic-a/epic-a.md"' in html
-    assert html.count('href="/file/') == 2  # forge has no main file
+    assert ('<a class="name-link" href="/file/initiative-a/epic-a/story-t-plan.md">'
+            "&lt;i&gt;T&lt;/i&gt;</a>") in html
+    assert html.count('href="/file/') == 3  # forge and ticket 1.2 have no file
 
 
-def test_tree_without_tickets_shows_note():
+def test_plain_names_without_files():
+    rows = rows_of(render([tree_initiative()]))[1:]
+    assert '<span role="cell" class="t-name d0"><span class="name-text">forge-a</span>' in rows[0]
+    assert '<span role="cell" class="t-name d2"><span class="name-text">Old</span>' in rows[4]
+
+
+def test_forge_report_link():
+    initiative = tree_initiative()
+    initiative.tree[0].path = "initiative-a/forge-a/forge-a.md"
+    initiative.tree[0].report = "initiative-a/forge-a/forge-report.html"
+    forge = rows_of(render([initiative]))[1]
+    assert ('<a class="name-link" href="/file/initiative-a/forge-a/forge-a.md">forge-a</a>'
+            '<a class="report-link" href="/file/initiative-a/forge-a/forge-report.html">'
+            "report</a>") in forge
+
+
+def test_tree_without_tickets_shows_note_first():
     initiative = tree_initiative(tickets=None)
-    initiative.tree[1].done = initiative.tree[1].total = None
+    epic = initiative.tree[1]
+    epic.done = epic.total = None
+    epic.tickets, epic.word = [], ""
     html = render([initiative])
-    assert "tickets unavailable" in html
-    assert "?/?" in html
+    panel = html.split('<div class="panel" role="cell"')[1]
+    assert panel.index("tickets unavailable") < panel.index('role="table"')
+    rows = rows_of(html)[1:]
+    assert len(rows) == 3  # forge, epic, spec: no ticket rows
+    assert '<span role="cell"></span>' in rows[1]
+
+
+def test_tree_has_no_old_badges_or_dates():
+    html = grid(render([tree_initiative()]))
+    assert "badge" not in html
+    assert "2026-10-01<" not in html
+    assert "<code>" not in html
 
 
 def test_one_toggle_per_non_empty_row_controlling_its_panel():
