@@ -11,8 +11,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
-from bmad_dash.signals import open_items, ticket_counts
-from bmad_dash.tree import STALE, Ticket, TreeItem
+from bmad_dash.signals import ticket_counts
+from bmad_dash.tree import FINISHED, STALE, STALE_AFTER, Ticket, TreeItem, status_word
 
 
 def display_path(path: Path) -> str:
@@ -178,8 +178,9 @@ def activity_cell(initiative: Initiative, now: datetime) -> str:
     if activity is None:
         inner = '<span class="muted">none</span>'
     else:
+        when_class = "when is-stale" if is_stale(initiative, now) else "when"
         inner = (
-            f'<span class="when" title="{activity.when:%Y-%m-%d %H:%M}">'
+            f'<span class="{when_class}" title="{activity.when:%Y-%m-%d %H:%M}">'
             f"{relative_time(activity.when, now)}</span>"
         )
         if activity.text:
@@ -190,18 +191,56 @@ def activity_cell(initiative: Initiative, now: datetime) -> str:
 
 SEP = '<span class="sep">·</span>'
 
+# Not-done ticket states, in the order the Status sentence lists them.
+WAITING_STATES = ["review", "in-progress", "planned", "backlog"]
+MAX_WAITING = 2
+TICKETS_FAILED = "Couldn't read tickets: tickets.py failed"
 
-def status_cell(initiative: Initiative) -> str:
-    """Until story 9: `<n> open · <done>/<total> done`."""
-    parts = [f"{open_items(initiative.tree)} open"]
-    counts = ticket_counts(initiative.tickets)
-    if counts is None:
-        parts.append("tickets ?")
+
+def is_stale(initiative: Initiative, now: datetime) -> bool:
+    """Last activity is STALE_AFTER old or older."""
+    activity = initiative.activity
+    return activity is not None and now - activity.when >= STALE_AFTER
+
+
+def has_open(items: list[TreeItem], kind: str) -> bool:
+    """Any item of `kind`, at any depth, not finished (stale counts as open)."""
+    return any(
+        (item.kind == kind and item.state != FINISHED) or has_open(item.children, kind)
+        for item in items
+    )
+
+
+def waiting_items(initiative: Initiative) -> list[str]:
+    """Ticket counts by status word, then doc cues."""
+    items = []
+    for state in WAITING_STATES:
+        count = sum(1 for t in initiative.tickets if t.get("state") == state)
+        if count:
+            items.append(f"{count} {status_word(state)}")
+    if has_open(initiative.tree, "forge"):
+        items.append("forge open")
+    if has_open(initiative.tree, "spec"):
+        items.append("spec to slice")
+    return items
+
+
+def status_cell(initiative: Initiative, now: datetime) -> str:
+    """The Status sentence: up to 2 waiting items then `+n`, `x/y done`, stale tag."""
+    if initiative.tickets is None:
+        parts = [f'<span class="err">{TICKETS_FAILED}</span>']
     else:
-        done, total = counts
+        waiting = waiting_items(initiative)
+        shown = waiting[:MAX_WAITING]
+        hidden = len(waiting) - len(shown)
+        if hidden:
+            shown.append(f"+{hidden}")
+        parts = [f'<span class="wait">{escape(item)}</span>' for item in shown]
+        done, total = ticket_counts(initiative.tickets)
         if total > 0:  # no `x/y done` when there are no counted tickets
-            parts.append(f"{done}/{total} done")
-    return f'<div class="c-status" role="cell">{SEP.join(parts)}</div>'
+            parts.append(f'<span class="done-n">{done}/{total} done</span>')
+    tag = '<span class="stale-tag">stale</span>' if is_stale(initiative, now) else ""
+    return f'<div class="c-status" role="cell">{SEP.join(parts)}{tag}</div>'
 
 
 def switch_form(worktree: Worktree) -> str:
@@ -232,7 +271,7 @@ def initiative_row(
     cells += [
         worktree_cell(initiative),
         activity_cell(initiative, now),
-        status_cell(initiative),
+        status_cell(initiative, now),
         actions_cell(initiative),
     ]
     return f'<div class="init" role="row">{"".join(cells)}</div>'
@@ -328,6 +367,10 @@ code { font-family: var(--mono); font-size: 12px; }
 .what { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
 .c-status { font-size: 13px; font-variant-numeric: tabular-nums; }
 .sep { color: var(--ink-muted); padding: 0 4px; }
+.wait { color: var(--accent); }
+.done-n { color: var(--ink-muted); }
+.err { color: var(--ink-2); }
+.when.is-stale { color: var(--stale); }
 
 /* Actions */
 .c-btns { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }

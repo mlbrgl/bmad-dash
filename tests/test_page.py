@@ -309,26 +309,83 @@ def test_no_activity_shows_none():
 
 # --- status cell ---
 
-def test_status_open_and_ticket_counts():
-    tickets = [{"state": "done"}, {"state": "done"}, {"state": "review"}, {"state": "dropped"}]
+def status_text(html: str) -> str:
+    """The Status cell's visible text."""
+    return re.sub(r"<[^>]+>", "", cell(html, "c-status"))
+
+
+def finished_tree(initiative: Initiative) -> Initiative:
+    """Finish the forge (the spec already is) so only ticket items show."""
+    initiative.tree[0].state = "finished"
+    return initiative
+
+
+def test_status_ticket_counts_in_order_then_done():
+    tickets = ([{"state": "planned"}] + [{"state": "review"}] * 5
+               + [{"state": "dropped"}])
+    html = render([finished_tree(signals_initiative(tickets))])
+    assert cell(html, "c-status") == (
+        '<span class="wait">5 review</span><span class="sep">·</span>'
+        '<span class="wait">1 planned</span><span class="sep">·</span>'
+        '<span class="done-n">0/6 done</span>'
+    )
+
+
+def test_status_in_progress_word_and_order():
+    tickets = [{"state": "backlog"}, {"state": "in-progress"}, {"state": "done"}]
+    html = render([finished_tree(signals_initiative(tickets))])
+    assert status_text(html) == "1 in progress·1 backlog·1/3 done"
+
+
+def test_status_doc_cues_without_tickets():
+    initiative = signals_initiative([])
+    initiative.tree[1].children[0].state = "stale"  # open spec inside the epic
+    html = render([initiative])
+    # The forge is stale (still open); no `x/y done` without tickets.
+    assert status_text(html) == "forge open·spec to slice"
+
+
+def test_status_overflow_collapses_to_plus_n():
+    tickets = [{"state": "review"}, {"state": "planned"}, {"state": "backlog"}]
     html = render([signals_initiative(tickets)])
-    # Only the epic is open in tree_initiative.
-    assert cell(html, "c-status") == '1 open<span class="sep">·</span>2/3 done'
+    # review, planned, backlog, forge open: 2 shown, 2 hidden.
+    assert status_text(html) == "1 review·1 planned·+2·0/3 done"
+    assert '<span class="wait">+2</span>' in html
 
 
-def test_status_tickets_unavailable():
-    html = render([signals_initiative(None)])
-    assert cell(html, "c-status") == '1 open<span class="sep">·</span>tickets ?'
+def test_status_all_dropped_shows_no_done_count():
+    html = render([finished_tree(signals_initiative([{"state": "dropped"}]))])
+    assert cell(html, "c-status") == ""
 
 
-def test_status_without_tickets_shows_open_only():
-    html = render([signals_initiative([])])
-    assert cell(html, "c-status") == "1 open"
+def test_status_tickets_unavailable_keeps_rest_of_row():
+    activity = Activity(NOW - timedelta(hours=3), "did", "memlog")
+    html = render([signals_initiative(None, activity)])
+    assert cell(html, "c-status") == (
+        '<span class="err">Couldn\'t read tickets: tickets.py failed</span>')
+    assert ">3 h ago<" in html
+    assert 'class="wt-name"' not in html and "no worktree" in html
 
 
-def test_status_all_dropped_shows_open_only():
-    html = render([signals_initiative([{"state": "dropped"}])])
-    assert cell(html, "c-status") == "1 open"
+def test_stale_activity_tags_status_and_tints_time():
+    activity = Activity(NOW - timedelta(days=14), "", "memlog")
+    html = render([signals_initiative([{"state": "review"}], activity)])
+    assert cell(html, "c-status").endswith('<span class="stale-tag">stale</span>')
+    assert status_text(html) == "1 review·forge open·0/1 donestale"
+    assert '<span class="when is-stale"' in html
+
+
+def test_fresh_activity_has_no_stale_tag():
+    activity = Activity(NOW - timedelta(days=13), "", "memlog")
+    html = render([signals_initiative([], activity)])
+    assert "stale-tag" not in cell(html, "c-status")
+    assert '<span class="when"' in html
+
+
+def test_tickets_failed_still_shows_stale_tag():
+    activity = Activity(NOW - timedelta(days=20), "", "memlog")
+    html = render([signals_initiative(None, activity)])
+    assert cell(html, "c-status").endswith('<span class="stale-tag">stale</span>')
 
 
 # --- actions cell ---

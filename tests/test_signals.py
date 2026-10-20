@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 
 from bmad_dash.initiatives import Worktree, list_initiatives
-from bmad_dash.signals import last_activity, open_items, ticket_counts
-from bmad_dash.tree import FINISHED, OPEN, STALE, Ticket, TreeItem
+from bmad_dash.signals import last_activity, ticket_counts
 
 T_OLD = datetime(2026, 10, 1, 9, 0)
 T_MID = datetime(2026, 10, 5, 9, 0)
@@ -136,30 +135,6 @@ def test_project_fixture_matched_worktree_uses_its_commit(project):
     assert matched.source == "commit"
     assert matched.text == "init"
     assert by_slug["initiative-orphan"].activity is None
-
-
-# --- open items ---
-
-
-def item(kind: str, state: str, children=()) -> TreeItem:
-    return TreeItem(kind, f"{kind}-x", None, None, state, children=list(children))
-
-
-def test_open_items_counts_open_at_any_depth():
-    tree = [
-        item("forge", OPEN),
-        item("spec", STALE),
-        item("spec", FINISHED),
-        item("epic", OPEN, [item("spec", OPEN)]),
-    ]
-    # Open forge, open epic, open spec inside it. Stale and finished don't count.
-    assert open_items(tree) == 3
-
-
-def test_open_items_ignores_stale_and_finished_and_tickets():
-    epic = item("epic", FINISHED, [item("spec", STALE)])
-    epic.tickets = [Ticket("1.1", "T", "review", None, None, False)]
-    assert open_items([epic]) == 0
 
 
 # --- tickets ---

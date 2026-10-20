@@ -16,9 +16,11 @@ uv run --directory ~/Code/bmad-dash bmad-dash --project-root ~/Code/owid-grapher
 
 Then open http://127.0.0.1:8765/ (change the port with `--port`).
 
-Each row shows last activity, open items, and tickets done/total from the
-project's `_bmad/method/scripts/tickets.py status` (run with `uv`). When that
-call fails the Tickets cell shows "?". Items untouched for 14 days are stale.
+Each row shows last activity and a Status sentence: what is waiting (ticket
+counts by status, `forge open`, `spec to slice`) and tickets done/total, from
+the project's `_bmad/method/scripts/tickets.py status` (run with `uv`). When
+that call fails the Status cell says "Couldn't read tickets: tickets.py
+failed". Items untouched for 14 days are stale.
 Expand a row to see its forges, specs and epics.
 
 `/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`

@@ -1,4 +1,4 @@
-"""Row signals: last activity, open items, tickets done/total.
+"""Row signals: last activity, tickets done/total.
 
 Rules (from `dashboard-status-rules.md`), structural signals only:
 
@@ -6,7 +6,6 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
   the mtime of any `*-plan.md` under it, and the last commit on each matched
   worktree. Ties go to the memlog, then the plan, then the commit.
   The text is display only: never derive state from it.
-- Open items: tree items (any depth) in state open. Stale and finished don't count.
 - Tickets: done/total, dropped tickets counted in neither.
 """
 
@@ -15,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from bmad_dash.tree import OPEN, TreeItem, read_memlog
+from bmad_dash.tree import read_memlog
 
 
 @dataclass
@@ -111,11 +110,6 @@ def last_activity(initiative_dir: Path, worktrees: list) -> Activity | None:
 
 def to_minute(when: datetime) -> datetime:
     return when.replace(second=0, microsecond=0)
-
-
-def open_items(tree: list[TreeItem]) -> int:
-    """Number of tree items (any depth) in state open."""
-    return sum((item.state == OPEN) + open_items(item.children) for item in tree)
 
 
 def ticket_counts(tickets: list[dict] | None) -> tuple[int, int] | None:
