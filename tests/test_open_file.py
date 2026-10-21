@@ -6,7 +6,13 @@ from urllib.parse import urlencode
 import pytest
 
 from bmad_dash.initiatives import list_worktrees
-from bmad_dash.opener import inject_relay, is_walkthrough_page, read_title, wrapper_page
+from bmad_dash.opener import (
+    inject_relay,
+    is_walkthrough_page,
+    read_title,
+    resolve_open_path,
+    wrapper_page,
+)
 from bmad_dash.server import default_open_file, make_server
 
 from conftest import git
@@ -413,3 +419,10 @@ def test_default_open_file_runs_code_g_without_shell(monkeypatch, tmp_path):
         assert kwargs["stdin"] is subprocess.DEVNULL
         assert kwargs["stdout"] is subprocess.DEVNULL
         assert kwargs["stderr"] is subprocess.DEVNULL
+
+
+def test_git_folder_refusal_ignores_case(tmp_path):
+    (tmp_path / ".GIT").mkdir()
+    config = tmp_path / ".GIT" / "config"
+    config.write_text("x")
+    assert resolve_open_path(tmp_path, str(config), []) is None

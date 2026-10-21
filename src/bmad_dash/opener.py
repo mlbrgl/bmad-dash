@@ -162,7 +162,8 @@ def resolve_open_path(worktree: Path, raw: str, other_worktrees: list[Path]) -> 
         return None
     if not target.is_relative_to(base) or not target.is_file():
         return None
-    if ".git" in target.relative_to(base).parts:
+    # Case-folded: macOS filesystems are case-insensitive, so `.GIT` is `.git`.
+    if ".git" in (part.lower() for part in target.relative_to(base).parts):
         return None
     for other in other_worktrees:
         try:
