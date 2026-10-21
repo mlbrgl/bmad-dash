@@ -37,6 +37,57 @@ def test_serves_dashboard_at_root(server):
     assert html.count('role="row"') == 1 + 5
 
 
+def test_no_github_remote_shows_no_github_line(server):
+    url = f"http://127.0.0.1:{server.server_port}/"
+    with urllib.request.urlopen(url) as response:
+        html = response.read().decode()
+    assert "Couldn't reach GitHub" not in html
+    assert 'class="btn btn-2 pr"' not in html
+
+
+def test_fetched_prs_reach_the_page(project, monkeypatch):
+    from bmad_dash import server as server_module
+    from bmad_dash.prs import PullRequest
+
+    calls = []
+
+    def fake_fetch(root):
+        calls.append(root)
+        return [PullRequest(7, "feature-a", "main", "open", "https://github.com/o/r/pull/7")]
+
+    monkeypatch.setattr(server_module, "fetch_prs", fake_fetch)
+    srv = make_server(project, 0)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{srv.server_port}/"
+        with urllib.request.urlopen(url) as response:
+            html = response.read().decode()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert calls == [project]
+    assert 'href="https://github.com/o/r/pull/7"' in html
+
+
+def test_github_failure_keeps_page(project, monkeypatch):
+    from bmad_dash import server as server_module
+
+    monkeypatch.setattr(server_module, "fetch_prs", lambda root: None)
+    srv = make_server(project, 0)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{srv.server_port}/"
+        with urllib.request.urlopen(url) as response:
+            html = response.read().decode()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert "Couldn't reach GitHub" in html
+    assert "Matched one" in html
+
+
 def test_query_string_is_ignored(server):
     url = f"http://127.0.0.1:{server.server_port}/?x=1"
     with urllib.request.urlopen(url) as response:

@@ -4,6 +4,7 @@ import argparse
 import subprocess
 import sys
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,6 +12,7 @@ from pathlib import Path
 from bmad_dash.files import NotFound, Refused, not_found_page, render_markdown, resolve_file
 from bmad_dash.initiatives import list_initiatives, list_worktrees, worktree_id
 from bmad_dash.page import render_page
+from bmad_dash.prs import fetch_prs
 
 HOST = "127.0.0.1"
 MAX_FORM_BYTES = 1024
@@ -68,10 +70,14 @@ def make_server(
                 return
             # Only picks which row says "Couldn't open VS Code"; runs nothing.
             vscode_failed = parse_qs(url.query).get("vscode_failed", [""])[0]
-            # Built on each request so the page is always current.
-            body = render_page(
-                list_initiatives(root), root, vscode_failed=vscode_failed
-            ).encode("utf-8")
+            # Built on each request so the page is always current. PRs come
+            # from GitHub at the same time, so the page waits for the slower one.
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                prs = pool.submit(fetch_prs, root)
+                initiatives = list_initiatives(root)
+                body = render_page(
+                    initiatives, root, vscode_failed=vscode_failed, prs=prs.result()
+                ).encode("utf-8")
             self.send_html(body)
 
         def do_POST(self):

@@ -30,17 +30,24 @@ Expand a row to see its forges, specs and epics.
 relative to `_bmad-output/`. Rendered `.md` pages get a `← Initiatives` back
 link; a missing path or one outside `_bmad-output/` gets a plain 404 page with
 the same link. Served files
-are sandboxed, so they can't trigger the VS Code button.
+are sandboxed, so they can't trigger VS Code.
 
 Each initiative shows at most one worktree: the first one `git worktree list`
-gives whose config names it. A row with a worktree has two actions:
+gives whose config names it. Click the caret to show a row's tree.
 
+- **Worktree cell**: click it to run `code -n <worktree>`, so the `code` CLI
+  must be on `PATH`. It only accepts a POST from the dashboard itself, and
+  only for a path `git worktree list` shows right now. If it refuses or `code`
+  fails, the cell says "Couldn't open VS Code".
 - **Resume** opens a new Claude Code session in that worktree
   (`claude://code/new`) with `/bmad Resume work on <slug>` prefilled.
-- **VS Code** runs `code -n <worktree>`, so the `code` CLI must be on `PATH`.
-  It only accepts a POST from the dashboard itself, and only for a path
-  `git worktree list` shows right now. If it refuses or `code` fails, the row
-  says "Couldn't open VS Code".
+- **#n** opens, in a new tab, the last PR of the stack that starts at the
+  worktree's branch (following PRs based on each other's branch). It needs
+  `gh` installed and signed in; PRs come from one
+  `gh pr list --author @me --state all --limit 100` per page load. No button
+  for a fork in the stack, no PR, or a detached worktree. If `gh` fails, the
+  header says "Couldn't reach GitHub". Repos without a `github.com` remote
+  skip it silently.
 
 A row without a worktree says `no worktree` and has no actions.
 

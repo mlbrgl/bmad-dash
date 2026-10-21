@@ -1,0 +1,106 @@
+"""The user's GitHub pull requests, and the last PR of a branch's stack."""
+
+import json
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+GH_TIMEOUT = 10  # seconds
+GH_COMMAND = [
+    "gh", "pr", "list", "--author", "@me", "--state", "all", "--limit", "100",
+    "--json", "number,headRefName,baseRefName,state,isDraft,url",
+]
+
+
+@dataclass
+class PullRequest:
+    number: int
+    head: str  # branch the PR comes from
+    base: str  # branch the PR merges into
+    state: str  # "draft", "open", "merged" or "closed"
+    url: str
+
+
+def has_github_remote(root: Path) -> bool:
+    """True if any remote of the repo at `root` points at github.com."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "-v"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and "github.com" in result.stdout
+
+
+def shown_state(raw: dict) -> str:
+    if raw.get("isDraft"):
+        return "draft"
+    return str(raw.get("state", "")).lower()  # gh says OPEN, MERGED, CLOSED
+
+
+def fetch_prs(root: Path) -> list[PullRequest] | None:
+    """The user's PRs in the repo at `root`, from one `gh pr list` call.
+    `[]` when the repo has no GitHub remote (gh is not run), None when gh fails."""
+    if not has_github_remote(root):
+        return []
+    try:
+        result = subprocess.run(
+            GH_COMMAND,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired):  # OSError: gh not installed
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return [
+            PullRequest(
+                number=int(raw["number"]),
+                head=str(raw["headRefName"]),
+                base=str(raw["baseRefName"]),
+                state=shown_state(raw),
+                url=str(raw["url"]),
+            )
+            for raw in json.loads(result.stdout)
+        ]
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
+def last_pr(prs: list[PullRequest], branch: str) -> PullRequest | None:
+    """The topmost PR of the stack that starts at `branch`, or None.
+
+    Start at the PR from `branch` (highest number if several). Then follow the
+    PR based on the current PR's head, until none is. Two PRs from different
+    heads based on the same branch is a fork: None. PRs in any state count.
+    """
+    def newest_from(head: str) -> PullRequest | None:
+        matches = [pr for pr in prs if pr.head == head]
+        return max(matches, key=lambda pr: pr.number) if matches else None
+
+    current = newest_from(branch)
+    visited = set()
+    while current is not None:
+        visited.add(current.head)
+        next_heads = {pr.head for pr in prs if pr.base == current.head}
+        if not next_heads:
+            return current
+        if len(next_heads) > 1:
+            return None  # fork
+        next_head = next_heads.pop()
+        if next_head in visited:
+            return None  # cycle: no sensible top
+        # Only PRs from that head stacked on this one: a re-targeted PR
+        # from the same head (other base) is not part of this stack.
+        current = max(
+            (pr for pr in prs if pr.head == next_head and pr.base == current.head),
+            key=lambda pr: pr.number,
+        )
+    return None

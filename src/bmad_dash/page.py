@@ -5,12 +5,14 @@ cells, with its tree as a full-width panel under it. The only script opens
 and closes panels and remembers which ones are open.
 """
 
+from collections.abc import Sequence
 from datetime import datetime
 from html import escape
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
+from bmad_dash.prs import PullRequest, last_pr
 from bmad_dash.signals import ticket_counts
 from bmad_dash.tree import FINISHED, STALE, STALE_AFTER, Ticket, TreeItem, status_word
 
@@ -141,17 +143,20 @@ def panel_content(initiative: Initiative, now: datetime) -> str:
 # --- row cells ---
 
 def initiative_cell(initiative: Initiative, panel_id: str, is_open: bool) -> str:
-    """Title with slug below. A caret toggle when there is a tree to show."""
+    """Title with slug below. When there is a tree to show, a caret button
+    before the title toggles it; the title itself is plain text."""
     title = escape(initiative.title)
     if initiative.tree:
         expanded = "true" if is_open else "false"
-        heading = (
+        caret = (
             f'<button type="button" class="toggle" aria-expanded="{expanded}"'
-            f' aria-controls="{panel_id}" data-slug="{escape(initiative.slug)}">'
-            f'<span class="caret" aria-hidden="true"></span>{title}</button>'
+            f' aria-controls="{panel_id}" data-slug="{escape(initiative.slug)}"'
+            f' aria-label="Show tree: {title}">'
+            f'<span class="caret" aria-hidden="true"></span></button>'
         )
     else:
-        heading = f'<span class="ttl"><span class="caret"></span>{title}</span>'
+        caret = '<span class="caret"></span>'
+    heading = f'<span class="ttl">{caret}{title}</span>'
     return (
         f'<div class="c-title" role="cell">{heading}'
         f'<span class="slug">{escape(initiative.slug)}</span></div>'
@@ -168,19 +173,33 @@ def panel_cell(
     )
 
 
-def worktree_block(worktree: Worktree) -> str:
+VSCODE_FAILED = "Couldn't open VS Code"
+
+
+def vscode_form(worktree: Worktree, slug: str) -> str:
+    """The whole worktree block is the submit button that opens it in VS Code.
+    POSTs the worktree id (what to open) and the slug (where to show a failure)."""
     return (
-        f'<div class="wt" title="{escape(str(worktree.path))}">'
+        f'<form class="vscode" method="post" action="/vscode">'
+        f'<input type="hidden" name="id" value="{worktree_id(worktree.path)}">'
+        f'<input type="hidden" name="slug" value="{escape(slug)}">'
+        f'<button type="submit" class="wt" title="{escape(str(worktree.path))}">'
+        f'<span class="sr-only">Open in VS Code: </span>'
         f'<span class="wt-name">{escape(worktree.path.name)}</span>'
-        f'<span class="wt-branch">{escape(worktree.branch)}</span></div>'
+        f'<span class="wt-branch">{escape(worktree.branch)}</span></button>'
+        f"</form>"
     )
 
 
-def worktree_cell(initiative: Initiative) -> str:
+def worktree_cell(initiative: Initiative, vscode_failed: str = "") -> str:
+    """The worktree (a VS Code button) or `no worktree`. The failure message
+    shows even when the worktree has gone since."""
     if not initiative.worktrees:
         inner = '<span class="muted">no worktree</span>'
     else:
-        inner = "".join(worktree_block(w) for w in initiative.worktrees)
+        inner = "".join(vscode_form(w, initiative.slug) for w in initiative.worktrees)
+    if vscode_failed and initiative.slug == vscode_failed:
+        inner += f'<span class="err">{VSCODE_FAILED}</span>'
     return f'<div class="c-wt" role="cell">{inner}</div>'
 
 
@@ -264,9 +283,6 @@ def status_cell(initiative: Initiative, now: datetime) -> str:
     return f'<div class="c-status" role="cell">{SEP.join(parts)}{tag}</div>'
 
 
-VSCODE_FAILED = "Couldn't open VS Code"
-
-
 def resume_href(worktree: Worktree, slug: str) -> str:
     """A `claude://` link that opens a new session in the worktree with the
     BMad resume prompt prefilled. Spaces encode as %20, not `+`."""
@@ -283,28 +299,48 @@ def resume_link(worktree: Worktree, slug: str) -> str:
     return f'<a class="btn btn-1" href="{href}" aria-label="{label}">Resume</a>'
 
 
-def vscode_form(initiative: Initiative) -> str:
-    """POSTs the worktree id (what to open) and the slug (where to show a failure)."""
-    worktree = initiative.worktrees[0]
-    label = escape(f"Open {worktree.path.name} in VS Code")
+# GitHub's 16px octicons, path data from @primer/octicons 19.15.0 (MIT).
+PR_ICONS = {
+    "open": "M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z",
+    "draft": "M3.25 1A2.25 2.25 0 0 1 4 5.372v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.251 2.251 0 0 1 3.25 1Zm9.5 14a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM2.5 3.25a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM3.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm9.5 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM14 7.5a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Zm0-4.25a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z",
+    "merged": "M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.734 5.734 0 0 1 5 7.123v3.505a2.25 2.25 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.95-.218ZM4.25 13.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm8.5-4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM5 3.25a.75.75 0 1 0 0 .005V3.25Z",
+    "closed": "M3.25 1A2.25 2.25 0 0 1 4 5.372v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.251 2.251 0 0 1 3.25 1Zm9.5 5.5a.75.75 0 0 1 .75.75v3.378a2.251 2.251 0 1 1-1.5 0V7.25a.75.75 0 0 1 .75-.75Zm-2.03-5.273a.75.75 0 0 1 1.06 0l.97.97.97-.97a.748.748 0 0 1 1.265.332.75.75 0 0 1-.205.729l-.97.97.97.97a.751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018l-.97-.97-.97.97a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734l.97-.97-.97-.97a.75.75 0 0 1 0-1.06ZM2.5 3.25a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM3.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm9.5 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z",
+}
+GITHUB_FAILED = "Couldn't reach GitHub"
+
+
+def pr_link(pr: PullRequest) -> str:
+    """`#<number>` with its state icon; opens the PR in a new tab."""
+    state = pr.state if pr.state in PR_ICONS else "open"
+    colour = "pr-open" if state == "open" else "pr-muted"
+    icon = (
+        f'<svg class="pr-icon {colour}" aria-hidden="true" width="16" height="16"'
+        f' viewBox="0 0 16 16"><path fill="currentColor" d="{PR_ICONS[state]}"/></svg>'
+    )
     return (
-        f'<form class="vscode" method="post" action="/vscode">'
-        f'<input type="hidden" name="id" value="{worktree_id(worktree.path)}">'
-        f'<input type="hidden" name="slug" value="{escape(initiative.slug)}">'
-        f'<button type="submit" class="btn btn-2" aria-label="{label}">VS Code</button>'
-        f"</form>"
+        f'<a class="btn btn-2 pr" href="{escape(pr.url)}" target="_blank" rel="noopener">'
+        f'{icon}<span class="sr-only">{state} pull request </span>#{pr.number}'
+        f'<span class="sr-only"> (opens in new tab)</span></a>'
     )
 
 
-def actions_cell(initiative: Initiative, vscode_failed: str = "") -> str:
-    """Resume and VS Code when the row has a worktree, else nothing.
-    The failure message shows even when the worktree has gone since."""
+def row_pr(initiative: Initiative, prs: Sequence[PullRequest] | None) -> PullRequest | None:
+    """The last PR of the stack starting at the row's worktree branch, or None."""
+    if not prs or not initiative.worktrees:
+        return None
+    branch = initiative.worktrees[0].branch
+    if branch == "detached":
+        return None
+    return last_pr(list(prs), branch)
+
+
+def actions_cell(initiative: Initiative, pr: PullRequest | None = None) -> str:
+    """Resume and, when known, the stack's last PR. Nothing without a worktree."""
     parts = []
     if initiative.worktrees:
         parts.append(resume_link(initiative.worktrees[0], initiative.slug))
-        parts.append(vscode_form(initiative))
-    if vscode_failed and initiative.slug == vscode_failed:
-        parts.append(f'<span class="err">{VSCODE_FAILED}</span>')
+        if pr is not None:
+            parts.append(pr_link(pr))
     return f'<div class="c-btns" role="cell">{"".join(parts)}</div>'
 
 
@@ -314,20 +350,22 @@ def initiative_row(
     is_open: bool,
     now: datetime,
     vscode_failed: str = "",
+    prs: Sequence[PullRequest] | None = (),
 ) -> str:
-    """One grid row. DOM order: title, panel, then the other cells, so Tab runs
-    toggle -> tree links -> actions. CSS puts the panel on grid row 2."""
+    """One grid row. DOM order: the five cells, then the panel, so Tab runs
+    caret -> worktree -> Resume -> PR -> tree links. CSS puts the panel on
+    grid row 2."""
     panel_id = f"panel-{index}"
     is_open = is_open and bool(initiative.tree)
-    cells = [initiative_cell(initiative, panel_id, is_open)]
-    if initiative.tree:
-        cells.append(panel_cell(initiative, panel_id, is_open, now))
-    cells += [
-        worktree_cell(initiative),
+    cells = [
+        initiative_cell(initiative, panel_id, is_open),
+        worktree_cell(initiative, vscode_failed),
         activity_cell(initiative, now),
         status_cell(initiative, now),
-        actions_cell(initiative, vscode_failed),
+        actions_cell(initiative, row_pr(initiative, prs)),
     ]
+    if initiative.tree:
+        cells.append(panel_cell(initiative, panel_id, is_open, now))
     css_class = "init is-finished" if initiative.finished else "init"
     return f'<div class="{css_class}" role="row">{"".join(cells)}</div>'
 
@@ -402,6 +440,7 @@ code { font-family: var(--mono); font-size: 12px; }
 .hdr { display: flex; align-items: baseline; gap: 14px; margin-bottom: 22px; }
 .hdr h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
 .path { color: var(--ink-muted); font: 12px var(--mono); }
+.hdr .err { margin-left: auto; font-size: 13px; }
 
 /* Initiative grid: header and rows share one column template. */
 .col-head, .init { display: grid; grid-template-columns: var(--cols);
@@ -412,15 +451,23 @@ code { font-family: var(--mono); font-size: 12px; }
 .init > [role="cell"] { grid-row: 1; }
 .init > .panel { grid-row: 2; grid-column: 1 / -1; }
 .c-title, .c-wt, .c-act, .wt { display: flex; flex-direction: column; min-width: 0; }
-.init:has(.toggle) { cursor: pointer; }
-.toggle, .ttl { display: flex; gap: 8px; align-items: baseline; font: inherit;
-                font-weight: 600; font-size: 14.5px; color: inherit; text-align: left; }
-.toggle { background: none; border: 0; padding: 0; cursor: pointer; }
+.ttl { display: flex; gap: 8px; align-items: baseline; font-weight: 600; font-size: 14.5px; }
 .caret { color: var(--ink-muted); font-size: 10px; width: 10px; flex: none; }
+/* A 24x24 hit area around the 10px caret, without moving the title. */
+.toggle { display: flex; align-items: center; justify-content: center; flex: none;
+          width: 24px; height: 24px; margin: -5px -7px; background: none; border: 0;
+          padding: 0; border-radius: 4px; cursor: pointer; }
+.toggle:hover .caret { color: var(--ink); }
 .toggle[aria-expanded="false"] .caret::before { content: "\\25B6"; }
 .toggle[aria-expanded="true"] .caret::before { content: "\\25BC"; }
 .slug { font: 12px var(--mono); color: var(--ink-muted); margin: 2px 0 0 18px; }
-.wt + .wt { margin-top: 6px; }
+form.vscode { margin: 0; min-width: 0; }
+form.vscode + form.vscode { margin-top: 6px; }
+/* The whole worktree block is a button that opens VS Code. */
+.wt { width: 100%; background: none; border: 0; padding: 0; font: inherit;
+      color: inherit; text-align: left; cursor: pointer; }
+.wt:hover .wt-name { text-decoration: underline; }
+.c-wt .err { font-size: 12px; margin-top: 2px; }
 .wt-name { font: 13px var(--mono); }
 .wt-branch { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
 .c-wt .muted, .c-act .muted { font-size: 13px; }
@@ -445,22 +492,21 @@ code { font-family: var(--mono); font-size: 12px; }
 
 /* Actions */
 /* Buttons side by side on one line, right-aligned. Like the mockup, the pair
-   is a few px wider than the column and spills into the gap on its left. */
-.c-btns { display: grid; grid-template-columns: auto auto; justify-content: end;
-          align-items: center; gap: 6px; }
-form.vscode { margin: 0; }
+   may be a few px wider than the column and spill into the gap on its left. */
+.c-btns { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
 .btn { display: inline-block; font: inherit; font-size: 13px; font-weight: 500;
        line-height: 1.45; padding: 6px 12px; border-radius: 6px; white-space: nowrap;
        cursor: pointer; border: 1px solid transparent; }
 .btn:hover { text-decoration: none; }
 .btn-1 { background: var(--accent); color: var(--accent-fg); }
 .btn-2 { background: transparent; border-color: var(--line); color: var(--ink); }
-.c-btns .err { grid-column: 1 / -1; font-size: 12px; text-align: right;
-               white-space: nowrap; }
+.pr-icon { vertical-align: -3px; margin-right: 4px; }
+.pr-open { color: var(--accent); }
+.pr-muted { color: var(--ink-muted); }
 
 /* Tree panel: its own grid, same for every row. */
 .panel { margin-top: 16px; padding: 8px 16px; background: var(--panel);
-         border-radius: 8px; font-size: 13px; cursor: auto; }
+         border-radius: 8px; font-size: 13px; }
 .panel[hidden] { display: none; }
 .t-note { font-size: 12px; padding: 4px 0 6px; }
 .t-row { display: grid; grid-template-columns: var(--tcols); column-gap: 16px;
@@ -525,14 +571,6 @@ SCRIPT = """
       setOpen(button, !isOpen(button));
       save();
     });
-    // Clicks on the row, outside links, buttons, forms and the panel, toggle too.
-    var row = button.closest(".init");
-    row.addEventListener("click", function (event) {
-      if (event.target.closest("a, button, form, .panel")) return;
-      var selection = window.getSelection();
-      if (selection && selection.toString()) return;
-      button.click();
-    });
   });
 
   // Show finished (n) <-> Hide finished. Not remembered.
@@ -554,6 +592,7 @@ def page_content(
     root_text: str,
     now: datetime,
     vscode_failed: str = "",
+    prs: Sequence[PullRequest] | None = (),
 ) -> str:
     """Unfinished rows in the table, finished ones behind Show finished (n).
     `initiatives` come sorted; `root_text` is already escaped. `vscode_failed`
@@ -566,7 +605,7 @@ def page_content(
     open_index = newest_index(current)
     if current:
         rows = "\n".join(
-            initiative_row(initiative, index, index == open_index, now, vscode_failed)
+            initiative_row(initiative, index, index == open_index, now, vscode_failed, prs)
             for index, initiative in enumerate(current)
         )
         parts = [
@@ -579,7 +618,9 @@ def page_content(
     if finished:
         # Panel ids continue after the current rows so they stay unique.
         rows = "\n".join(
-            initiative_row(initiative, len(current) + index, False, now, vscode_failed)
+            initiative_row(
+                initiative, len(current) + index, False, now, vscode_failed, prs
+            )
             for index, initiative in enumerate(finished)
         )
         parts.append(
@@ -599,13 +640,18 @@ def render_page(
     root: Path,
     now: datetime | None = None,
     vscode_failed: str = "",
+    prs: Sequence[PullRequest] | None = (),
 ) -> str:
     """The whole page. `vscode_failed` is a slug from the URL; it only picks
-    which row shows the failure message."""
+    which row shows the failure message. `prs` is None when GitHub couldn't be
+    reached: the header says so and no row gets a PR button."""
     if now is None:
         now = datetime.now()
     root_text = escape(display_path(root))
-    content = page_content(by_activity(initiatives), root_text, now, vscode_failed)
+    content = page_content(
+        by_activity(initiatives), root_text, now, vscode_failed, prs
+    )
+    github = f'<span class="err">{GITHUB_FAILED}</span>' if prs is None else ""
     storage_key = escape("bmad-dash:open:" + str(root))
     return f"""<!doctype html>
 <html lang="en">
@@ -617,7 +663,7 @@ def render_page(
 </head>
 <body>
 <main class="page" data-storage-key="{storage_key}">
-<header class="hdr"><h1>Initiatives</h1><span class="path">{root_text}</span></header>
+<header class="hdr"><h1>Initiatives</h1><span class="path">{root_text}</span>{github}</header>
 {content}
 <script>{SCRIPT}</script>
 </main>

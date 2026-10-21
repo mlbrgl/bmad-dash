@@ -1,0 +1,150 @@
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from bmad_dash import prs as prs_module
+from bmad_dash.prs import GH_COMMAND, PullRequest, fetch_prs, last_pr
+
+
+def pr(number, head, base="main", state="open"):
+    return PullRequest(number, head, base, state, f"https://github.com/o/r/pull/{number}")
+
+
+# --- last_pr ---
+
+def test_lone_pr():
+    assert last_pr([pr(7, "b")], "b").number == 7
+
+
+def test_stack_walks_to_the_top():
+    prs = [pr(7, "b"), pr(8, "c", base="b"), pr(9, "d", base="c"), pr(3, "x")]
+    assert last_pr(prs, "b").number == 9
+
+
+def test_stack_from_the_middle():
+    prs = [pr(7, "b"), pr(8, "c", base="b"), pr(9, "d", base="c")]
+    assert last_pr(prs, "c").number == 9
+
+
+def test_any_state_counts():
+    prs = [pr(7, "b", state="merged"), pr(8, "c", base="b", state="merged")]
+    top = last_pr(prs, "b")
+    assert (top.number, top.state) == (8, "merged")
+
+
+def test_several_prs_from_the_branch_takes_highest_number():
+    prs = [pr(5, "b", state="closed"), pr(12, "b"), pr(9, "b", state="closed")]
+    assert last_pr(prs, "b").number == 12
+
+
+def test_same_head_twice_above_is_not_a_fork():
+    prs = [pr(7, "b"), pr(8, "c", base="b", state="closed"), pr(10, "c", base="b")]
+    assert last_pr(prs, "b").number == 10
+
+
+def test_retargeted_pr_from_next_head_is_not_followed():
+    # #8 c->b was closed, #10 reuses head c but targets main: the stack stops at #8.
+    prs = [pr(7, "b"), pr(8, "c", base="b", state="closed"), pr(10, "c"),
+           pr(11, "d", base="c")]
+    assert last_pr(prs, "b").number == 11
+    prs = [pr(7, "b"), pr(8, "c", base="b", state="closed"), pr(10, "c")]
+    assert last_pr(prs, "b").number == 8
+
+
+def test_fork_gives_none():
+    prs = [pr(7, "b"), pr(8, "c", base="b"), pr(9, "d", base="b")]
+    assert last_pr(prs, "b") is None
+
+
+def test_fork_higher_up_gives_none():
+    prs = [pr(7, "b"), pr(8, "c", base="b"), pr(9, "d", base="c"), pr(10, "e", base="c")]
+    assert last_pr(prs, "b") is None
+
+
+def test_no_pr_for_branch():
+    assert last_pr([pr(7, "other")], "b") is None
+    assert last_pr([], "b") is None
+
+
+def test_cycle_gives_none():
+    prs = [pr(7, "b", base="c"), pr(8, "c", base="b")]
+    assert last_pr(prs, "b") is None
+
+
+# --- fetch_prs ---
+
+GH_JSON = json.dumps([
+    {"number": 7, "headRefName": "b", "baseRefName": "main", "state": "OPEN",
+     "isDraft": False, "url": "https://github.com/o/r/pull/7"},
+    {"number": 8, "headRefName": "c", "baseRefName": "b", "state": "OPEN",
+     "isDraft": True, "url": "https://github.com/o/r/pull/8"},
+    {"number": 9, "headRefName": "d", "baseRefName": "main", "state": "MERGED",
+     "isDraft": False, "url": "https://github.com/o/r/pull/9"},
+    {"number": 10, "headRefName": "e", "baseRefName": "main", "state": "CLOSED",
+     "isDraft": False, "url": "https://github.com/o/r/pull/10"},
+])
+REMOTE = "origin\tgit@github.com:o/r.git (fetch)\norigin\tgit@github.com:o/r.git (push)\n"
+
+
+def fake_run(calls, remote=REMOTE, gh=None):
+    """A `subprocess.run` stand-in. `gh` is a CompletedProcess or an exception."""
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        if args[:2] == ["git", "remote"]:
+            return subprocess.CompletedProcess(args, 0, remote, "")
+        if isinstance(gh, BaseException):
+            raise gh
+        return gh
+    return run
+
+
+def done(stdout="", code=0):
+    return subprocess.CompletedProcess([], code, stdout, "")
+
+
+def test_fetch_parses_prs_and_states(monkeypatch):
+    calls = []
+    monkeypatch.setattr(prs_module.subprocess, "run", fake_run(calls, gh=done(GH_JSON)))
+    result = fetch_prs(Path("/root"))
+    assert [(p.number, p.head, p.base, p.state) for p in result] == [
+        (7, "b", "main", "open"), (8, "c", "b", "draft"),
+        (9, "d", "main", "merged"), (10, "e", "main", "closed"),
+    ]
+    assert result[0].url == "https://github.com/o/r/pull/7"
+    args, kwargs = calls[1]
+    assert args == GH_COMMAND
+    assert kwargs["cwd"] == Path("/root")
+    assert kwargs["timeout"] == 10
+
+
+def test_no_github_remote_is_empty_and_runs_no_gh(monkeypatch):
+    calls = []
+    monkeypatch.setattr(prs_module.subprocess, "run",
+                        fake_run(calls, remote="origin\tgit@gitlab.com:o/r.git (fetch)\n"))
+    assert fetch_prs(Path("/root")) == []
+    assert len(calls) == 1  # only git remote
+
+
+def test_no_remote_at_all_is_empty(monkeypatch):
+    calls = []
+    monkeypatch.setattr(prs_module.subprocess, "run", fake_run(calls, remote=""))
+    assert fetch_prs(Path("/root")) == []
+
+
+@pytest.mark.parametrize("gh", [
+    done("", code=1),
+    FileNotFoundError("gh"),
+    subprocess.TimeoutExpired("gh", 10),
+    done("not json"),
+    done('[{"number": 1}]'),  # missing fields
+    done('{"a": 1}'),  # not a list of objects
+])
+def test_gh_failures_give_none(monkeypatch, gh):
+    monkeypatch.setattr(prs_module.subprocess, "run", fake_run([], gh=gh))
+    assert fetch_prs(Path("/root")) is None
+
+
+def test_real_repo_without_remote_is_empty(project):
+    assert fetch_prs(project) == []
