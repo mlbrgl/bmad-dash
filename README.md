@@ -27,9 +27,8 @@ behind "Show finished (n)"; one with nothing open and no such status says
 Expand a row to see its forges, specs and epics.
 
 `/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
-relative to `_bmad-output/`. Rendered `.md` pages get a `← Initiatives` back
-link; a missing path or one outside `_bmad-output/` gets a plain 404 page with
-the same link. Served files
+relative to `_bmad-output/`. A missing path or one outside `_bmad-output/` gets
+a plain 404 page. Served files
 are sandboxed, so they can't trigger VS Code.
 
 Walkthrough pages (`initiative-*/.../walkthrough-*/*.html`) are shown inside

@@ -152,7 +152,7 @@ def test_file_markdown_is_rendered(files_server):
     assert response.getheader("Content-Type").startswith("text/html")
     assert b"<table>" in body
     assert b'<pre class="frontmatter">' in body
-    assert b'<a class="back" href="/">&larr; Initiatives</a>' in body
+    assert b"Initiatives</a>" not in body  # no back link
 
 
 def test_file_html_is_served_as_is(files_server, files_project):
@@ -178,13 +178,13 @@ def test_file_encoded_name_is_decoded(files_server):
     "/file/initiative-x",
     "/file/initiative-x/a%00b.md",
 ])
-def test_file_not_served_is_404_page_with_back_link(files_server, path):
+def test_file_not_served_is_404_page(files_server, path):
     # Outside paths get the same 404 as missing ones.
     response, body = raw_get(files_server, path)
     assert response.status == 404
     assert response.getheader("Content-Type").startswith("text/html")
     assert b"Not found" in body
-    assert b'<a class="back" href="/">&larr; Initiatives</a>' in body
+    assert b"Initiatives</a>" not in body  # no back link
 
 
 @pytest.mark.parametrize("path", [
