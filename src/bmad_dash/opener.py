@@ -10,7 +10,7 @@ same-origin to `/open-file`.
 
 import re
 from html import escape, unescape
-from pathlib import Path
+from pathlib import Path, PurePath
 
 MESSAGE_TYPE = "bmad-dash:open-file"
 
@@ -165,11 +165,23 @@ def resolve_open_path(worktree: Path, raw: str, other_worktrees: list[Path]) -> 
     # Case-folded: macOS filesystems are case-insensitive, so `.GIT` is `.git`.
     if ".git" in (part.lower() for part in target.relative_to(base).parts):
         return None
+    # Case-folded too, so `.Claude/worktrees/x` can't slip past `.claude/worktrees/x`.
+    folded_base = lowered(base)
+    folded_target = lowered(target)
     for other in other_worktrees:
         try:
-            other = other.resolve()
+            folded_other = lowered(other.resolve())
         except (OSError, ValueError):
             continue
-        if other != base and other.is_relative_to(base) and target.is_relative_to(other):
+        if (
+            folded_other != folded_base
+            and folded_other.is_relative_to(folded_base)
+            and folded_target.is_relative_to(folded_other)
+        ):
             return None
     return target
+
+
+def lowered(path: Path) -> PurePath:
+    """`path` in lower case, for comparing paths on a case-insensitive disk."""
+    return PurePath(str(path).lower())

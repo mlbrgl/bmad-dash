@@ -6,12 +6,12 @@ A worktree works on an initiative when its own
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
-import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from bmad_dash import commands
 from bmad_dash.signals import Activity, last_activity, worktree_commits
 from bmad_dash.tree import TreeItem, build_tree, frontmatter, load_tickets
 
@@ -41,15 +41,14 @@ class Initiative:
         return self.status in ("done", "dropped")
 
 
-def list_worktrees(root: Path) -> list[Worktree]:
-    """All worktrees of the repo at `root`, main checkout included."""
-    output = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
+def list_worktrees(root: Path) -> list[Worktree] | None:
+    """All worktrees of the repo at `root`, main checkout included.
+    None when git fails."""
+    output = commands.run(
+        ["git", "worktree", "list", "--porcelain"], root, commands.GIT_TIMEOUT
+    )
+    if output is None:
+        return None
 
     worktrees = []
     # Each worktree is a block of lines separated by a blank line.
@@ -124,9 +123,10 @@ def worktrees_by_slug(
 ) -> dict[str, Worktree]:
     """Initiative slug -> the worktree working on it.
     One worktree per initiative: the first one `git worktree list` gives wins.
-    Pass `worktrees` from `list_worktrees` to skip calling git again."""
+    Pass `worktrees` from `list_worktrees` to skip calling git again.
+    When git fails, no initiative has a worktree."""
     if worktrees is None:
-        worktrees = list_worktrees(root)
+        worktrees = list_worktrees(root) or []
     claimed: dict[str, Worktree] = {}
     for worktree in worktrees:
         slug = active_initiative(worktree.path)

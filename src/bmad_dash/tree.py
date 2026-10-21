@@ -14,10 +14,11 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
 """
 
 import json
-import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from bmad_dash import commands
 
 STALE_AFTER = timedelta(days=14)
 
@@ -59,22 +60,16 @@ def load_tickets(root: Path, initiative_dir: Path) -> list[dict] | None:
     script = root / "_bmad" / "method" / "scripts" / "tickets.py"
     if not script.is_file():
         return None
-    try:
-        result = subprocess.run(
-            ["uv", "run", str(script), "--project-root", str(root),
-             "status", str(initiative_dir)],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError, ValueError):
-        # ValueError covers UnicodeDecodeError on undecodable output.
-        return None
-    if result.returncode != 0:
+    output = commands.run(
+        ["uv", "run", str(script), "--project-root", str(root),
+         "status", str(initiative_dir)],
+        root,
+        commands.TICKETS_TIMEOUT,
+    )
+    if output is None:
         return None
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(output)
     except json.JSONDecodeError:
         return None
     if not isinstance(data, dict):

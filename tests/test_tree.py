@@ -291,13 +291,11 @@ def make_walkthrough(
     return folder
 
 
-def blocks(checked: int, total: int) -> str:
-    lines = [f"- [{'x' if i < checked else ' '}] Block {i + 1}" for i in range(total)]
-    return "---\ntitle: w\n---\n# W\n\n**Blocks**\n\n" + "\n".join(lines) + "\n"
+NARRATIVE = "---\ntitle: w\n---\n# W\n\nText.\n"
 
 
 def test_walkthrough_html_and_narrative(initiative):
-    make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    make_walkthrough(initiative, "walkthrough-a", NARRATIVE)
     item = only(build_tree(initiative, [], NOW))
     assert item.kind == "walk"
     assert item.path == "initiative-x/walkthrough-a/walkthrough-a.html"
@@ -307,55 +305,50 @@ def test_walkthrough_html_and_narrative(initiative):
 
 
 def test_walkthrough_narrative_only(initiative):
-    make_walkthrough(initiative, "walkthrough-a", blocks(2, 9), html=False)
+    make_walkthrough(initiative, "walkthrough-a", NARRATIVE, html=False)
     item = only(build_tree(initiative, [], NOW))
     assert item.path == "initiative-x/walkthrough-a/walkthrough-a.md"
     assert item.report is None
 
 
-def test_walkthrough_all_checked_has_no_status_word_and_is_open(initiative):
-    make_walkthrough(initiative, "walkthrough-a", blocks(9, 9))
+def test_walkthrough_checked_checklist_has_no_status_word_and_is_open(initiative):
+    # A checklist is just text: checked boxes don't make a walkthrough done.
+    checklist = "---\ntitle: w\n---\n# W\n\n- [x] One\n- [x] Two\n"
+    make_walkthrough(initiative, "walkthrough-a", checklist)
     item = only(build_tree(initiative, [], NOW))
     assert item.word == ""
     assert item.state == OPEN
 
 
-def test_walkthrough_some_checked_has_no_status_word(initiative):
-    make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
-    item = only(build_tree(initiative, [], NOW))
-    assert item.word == ""
-    assert item.state == OPEN
-
-
-def test_walkthrough_all_checked_but_old_is_stale(initiative):
-    folder = make_walkthrough(initiative, "walkthrough-a", blocks(9, 9))
+def test_walkthrough_old_is_stale(initiative):
+    folder = make_walkthrough(initiative, "walkthrough-a", NARRATIVE)
     set_mtime(folder, NOW - timedelta(days=20))
     assert only(build_tree(initiative, [], NOW)).state == STALE
 
 
 def test_walkthrough_stale_when_commit_is_newer(initiative):
-    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    folder = make_walkthrough(initiative, "walkthrough-a", NARRATIVE)
     set_mtime(folder, NOW - timedelta(days=2))
     item = only(build_tree(initiative, [], NOW, NOW - timedelta(days=1)))
     assert item.state == STALE
 
 
 def test_walkthrough_open_when_folder_is_newer_than_commit(initiative):
-    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    folder = make_walkthrough(initiative, "walkthrough-a", NARRATIVE)
     set_mtime(folder, NOW - timedelta(days=1))
     item = only(build_tree(initiative, [], NOW, NOW - timedelta(days=2)))
     assert item.state == OPEN
 
 
 def test_walkthrough_open_when_commit_equals_updated(initiative):
-    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    folder = make_walkthrough(initiative, "walkthrough-a", NARRATIVE)
     set_mtime(folder, NOW - timedelta(days=1))
     item = only(build_tree(initiative, [], NOW, NOW - timedelta(days=1)))
     assert item.state == OPEN
 
 
 def test_walkthrough_old_folder_with_older_commit_is_stale(initiative):
-    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    folder = make_walkthrough(initiative, "walkthrough-a", NARRATIVE)
     set_mtime(folder, NOW - timedelta(days=14))
     item = only(build_tree(initiative, [], NOW, NOW - timedelta(days=30)))
     assert item.state == STALE
@@ -363,14 +356,14 @@ def test_walkthrough_old_folder_with_older_commit_is_stale(initiative):
 
 def test_walkthrough_without_commit_uses_age_only(initiative):
     # No worktree or git failed: last_commit is None.
-    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    folder = make_walkthrough(initiative, "walkthrough-a", NARRATIVE)
     set_mtime(folder, NOW - timedelta(days=2))
     assert only(build_tree(initiative, [], NOW, None)).state == OPEN
 
 
 def test_walkthrough_at_epic_level_stale_when_commit_is_newer(initiative):
     epic = make_folder(initiative, "epic-x")
-    folder = make_walkthrough(epic, "walkthrough-b", blocks(0, 2))
+    folder = make_walkthrough(epic, "walkthrough-b", NARRATIVE)
     set_mtime(folder, NOW - timedelta(days=2))
     epic_row = only(build_tree(initiative, [], NOW, NOW - timedelta(days=1)))
     assert only(epic_row.children).state == STALE
@@ -408,7 +401,7 @@ def test_walkthrough_unreadable_narrative_has_no_status(initiative):
 
 
 def test_walkthrough_stale_when_open_and_old(initiative):
-    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    folder = make_walkthrough(initiative, "walkthrough-a", NARRATIVE)
     set_mtime(folder, NOW - timedelta(days=14))
     item = only(build_tree(initiative, [], NOW))
     assert item.state == STALE
@@ -417,7 +410,7 @@ def test_walkthrough_stale_when_open_and_old(initiative):
 
 def test_walkthrough_at_epic_level_after_forges_and_specs(initiative):
     epic = make_folder(initiative, "epic-x")
-    make_walkthrough(epic, "walkthrough-b", blocks(0, 2))
+    make_walkthrough(epic, "walkthrough-b", NARRATIVE)
     make_folder(epic, "spec-a", f"updated: {ago(1)}\n")
     make_folder(epic, "forge-a", f"updated: {ago(1)}\n")
     children = only(build_tree(initiative, [], NOW)).children
@@ -480,6 +473,21 @@ def test_load_tickets_bad_json_is_none(tmp_path, initiative):
 
 def test_load_tickets_missing_script_is_none(tmp_path, initiative):
     assert load_tickets(tmp_path, initiative) is None
+
+
+def test_load_tickets_hang_is_none(tmp_path, initiative, monkeypatch):
+    from bmad_dash import commands
+
+    write_fake_tickets_py(tmp_path, "")
+    calls = []
+
+    def hang(args, **kwargs):
+        calls.append(kwargs["timeout"])
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(commands.subprocess, "run", hang)
+    assert load_tickets(tmp_path, initiative) is None
+    assert calls == [commands.TICKETS_TIMEOUT]
 
 
 def test_failing_tickets_py_shows_unavailable_on_page(tmp_path):

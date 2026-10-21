@@ -1,9 +1,10 @@
 """The user's GitHub pull requests, and the last PR of a branch's stack."""
 
 import json
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from bmad_dash import commands
 
 GH_TIMEOUT = 10  # seconds
 GH_COMMAND = [
@@ -21,19 +22,13 @@ class PullRequest:
     url: str
 
 
-def has_github_remote(root: Path) -> bool:
-    """True if any remote of the repo at `root` points at github.com."""
-    try:
-        result = subprocess.run(
-            ["git", "remote", "-v"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=GH_TIMEOUT,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    return result.returncode == 0 and "github.com" in result.stdout
+def has_github_remote(root: Path) -> bool | None:
+    """True if any remote of the repo at `root` points at github.com.
+    None when git fails."""
+    output = commands.run(["git", "remote", "-v"], root, GH_TIMEOUT)
+    if output is None:
+        return None
+    return "github.com" in output
 
 
 def shown_state(raw: dict) -> str:
@@ -44,20 +39,14 @@ def shown_state(raw: dict) -> str:
 
 def fetch_prs(root: Path) -> list[PullRequest] | None:
     """The user's PRs in the repo at `root`, from one `gh pr list` call.
-    `[]` when the repo has no GitHub remote (gh is not run), None when gh fails."""
-    if not has_github_remote(root):
-        return []
-    try:
-        result = subprocess.run(
-            GH_COMMAND,
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=GH_TIMEOUT,
-        )
-    except (OSError, subprocess.TimeoutExpired):  # OSError: gh not installed
+    `[]` when the repo has no GitHub remote (gh is not run), None when git or gh fails."""
+    remote = has_github_remote(root)
+    if remote is None:
         return None
-    if result.returncode != 0:
+    if not remote:
+        return []
+    output = commands.run(GH_COMMAND, root, GH_TIMEOUT)
+    if output is None:
         return None
     try:
         return [
@@ -68,7 +57,7 @@ def fetch_prs(root: Path) -> list[PullRequest] | None:
                 state=shown_state(raw),
                 url=str(raw["url"]),
             )
-            for raw in json.loads(result.stdout)
+            for raw in json.loads(output)
         ]
     except (ValueError, TypeError, KeyError):
         return None

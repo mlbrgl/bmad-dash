@@ -246,3 +246,86 @@ def test_short_body_times_out_and_server_keeps_serving(project, monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_slow_trickle_is_cut_at_the_deadline(project, monkeypatch):
+    # One byte at a time, each well under the socket timeout: the whole-body
+    # deadline still closes the connection, and no command runs.
+    monkeypatch.setattr(server_module, "REQUEST_TIMEOUT", 5)
+    monkeypatch.setattr(server_module, "REQUEST_DEADLINE", 0.6)
+    launched = []
+    server = make_server(project, 0, launch=launched.append)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_port
+    try:
+        slow = socket.create_connection(("127.0.0.1", port))
+        slow.settimeout(5)
+        slow.sendall(
+            b"POST /vscode HTTP/1.1\r\n"
+            + f"Host: 127.0.0.1:{port}\r\n".encode()
+            + f"Origin: http://127.0.0.1:{port}\r\n".encode()
+            + b"Content-Type: application/x-www-form-urlencoded\r\n"
+            + b"Content-Length: 100\r\n\r\n"
+        )
+        started = time.monotonic()
+        closed = False
+        for _ in range(100):
+            try:
+                slow.sendall(b"x")
+            except OSError:  # server already closed it
+                closed = True
+                break
+            time.sleep(0.1)
+            if time.monotonic() - started > 2:
+                break
+        if not closed:
+            try:
+                closed = slow.recv(1024) == b""
+            except ConnectionResetError:
+                closed = True
+        elapsed = time.monotonic() - started
+        slow.close()
+        assert closed
+        assert elapsed < 3  # well before 100 bytes at 0.1 s each
+        assert launched == []
+
+        # The server keeps serving.
+        response, _ = raw_get(server, "/no-such-page")
+        assert response.status == 404
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_validate_root_accepts_a_repo(project):
+    assert server_module.validate_root(project) is None
+
+
+def test_body_cut_short_by_client_is_400(project):
+    # The client sends less than Content-Length, then closes its side:
+    # not a timeout, so it gets the usual 400 and nothing runs.
+    launched = []
+    server = make_server(project, 0, launch=launched.append)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_port
+    try:
+        conn = socket.create_connection(("127.0.0.1", port))
+        conn.settimeout(5)
+        conn.sendall(
+            b"POST /vscode HTTP/1.1\r\n"
+            + f"Host: 127.0.0.1:{port}\r\n".encode()
+            + f"Origin: http://127.0.0.1:{port}\r\n".encode()
+            + b"Content-Type: application/x-www-form-urlencoded\r\n"
+            + b"Content-Length: 100\r\n\r\n"
+            + b"id=abc"
+        )
+        conn.shutdown(socket.SHUT_WR)
+        reply = conn.recv(1024)
+        conn.close()
+        assert reply.startswith(b"HTTP/1.0 400") or reply.startswith(b"HTTP/1.1 400")
+        assert launched == []
+    finally:
+        server.shutdown()
+        server.server_close()

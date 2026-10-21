@@ -8,11 +8,11 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
   The text is display only: never derive state from it.
 """
 
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from bmad_dash import commands
 from bmad_dash.files import split_frontmatter
 from bmad_dash.tree import file_mtime, read_memlog
 
@@ -59,19 +59,12 @@ def plan_activities(initiative_dir: Path) -> list[Activity]:
 
 def last_commit(worktree_path: Path) -> Activity | None:
     """The last commit on the worktree's HEAD, or None if git fails."""
-    try:
-        result = subprocess.run(
-            ["git", "log", "-1", "--format=%ct%x00%s"],
-            cwd=worktree_path,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError, ValueError):
+    output = commands.run(
+        ["git", "log", "-1", "--format=%ct%x00%s"], worktree_path, commands.GIT_TIMEOUT
+    )
+    if output is None:
         return None
-    if result.returncode != 0:
-        return None
-    stamp, _, subject = result.stdout.strip("\n").partition("\x00")
+    stamp, _, subject = output.strip("\n").partition("\x00")
     try:
         when = datetime.fromtimestamp(int(stamp))
     except ValueError:

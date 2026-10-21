@@ -426,3 +426,41 @@ def test_git_folder_refusal_ignores_case(tmp_path):
     config = tmp_path / ".GIT" / "config"
     config.write_text("x")
     assert resolve_open_path(tmp_path, str(config), []) is None
+
+
+def test_nested_worktree_in_other_case_is_404(opener, walk_project):
+    # macOS disks ignore case: `.Claude/...` is the nested `.claude/...` worktree.
+    raw = walk_project / ".Claude" / "worktrees" / "nest" / "nest.py"
+    if not raw.is_file():
+        pytest.skip("case-sensitive filesystem")
+    server, opened = opener
+    status, _ = post_open(server, {"page": SHARED_PAGE, "path": str(raw)})
+    assert status == 404
+    assert opened == []
+
+
+def test_nested_worktree_check_ignores_case(tmp_path):
+    main = tmp_path / "main"
+    nest = main / ".claude" / "worktrees" / "x"
+    nest.mkdir(parents=True)
+    (nest / "f.py").write_text("f\n")
+    # The other worktree listed in upper case, only as a path string: runs on
+    # any disk, since the check compares case-folded paths.
+    other = main / ".CLAUDE" / "worktrees" / "X"
+    assert resolve_open_path(main, str(nest / "f.py"), [main, other]) is None
+    assert resolve_open_path(main, str(nest / "f.py"), [main]) is not None
+
+
+def test_git_failure_is_500(opener, walk_project, monkeypatch):
+    from bmad_dash import commands
+
+    server, opened = opener
+    path = a_py(walk_project)
+    monkeypatch.setattr(
+        commands.subprocess, "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 128, "", "fatal"),
+    )
+    status, response = post_open(server, wt_file=path)
+    assert status == 500
+    assert response.body == b""
+    assert opened == []

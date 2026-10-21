@@ -4,12 +4,14 @@ import argparse
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from bmad_dash import commands
 from bmad_dash.files import NotFound, Refused, not_found_page, render_markdown, resolve_file
 from bmad_dash.initiatives import (
     initiative_worktree,
@@ -32,19 +34,19 @@ MAX_FORM_BYTES = 1024
 # Seconds a connection may sit idle, e.g. a POST that sends less body than
 # its Content-Length. Then the connection closes and the thread is freed.
 REQUEST_TIMEOUT = 10
+# Seconds a POST body may take in total. Stops a client that sends one byte
+# at a time, each under REQUEST_TIMEOUT, from holding a thread for hours.
+REQUEST_DEADLINE = 10
 
 
 def validate_root(root: Path) -> str | None:
     """An error message if `root` is not a usable project, else None."""
     if not (root / "_bmad-output").is_dir():
         return f"{root} has no _bmad-output/ folder"
-    result = subprocess.run(
-        ["git", "rev-parse", "--is-inside-work-tree"],
-        cwd=root,
-        capture_output=True,
-        text=True,
+    output = commands.run(
+        ["git", "rev-parse", "--is-inside-work-tree"], root, commands.GIT_TIMEOUT
     )
-    if result.returncode != 0:
+    if output is None:
         return f"{root} is not a git repository"
     return None
 
@@ -130,13 +132,17 @@ def make_server(
                 return
             form = self.read_form()
             if form is None:
-                self.send_error(400)
+                self.refuse_form(self.send_error)
                 return
             wanted = form.get("id", [""])[0]
             slug = form.get("slug", [""])[0]
             failed = "/?vscode_failed=" + quote(slug, safe="")
             # Fresh list each time: only a path git lists right now can run.
-            matches = [w.path for w in list_worktrees(root) if worktree_id(w.path) == wanted]
+            worktrees = list_worktrees(root)
+            if worktrees is None:  # git failed
+                self.redirect(failed)
+                return
+            matches = [w.path for w in worktrees if worktree_id(w.path) == wanted]
             if not matches:
                 self.redirect(failed)
                 return
@@ -155,7 +161,7 @@ def make_server(
                 return
             form = self.read_form()
             if form is None:
-                self.send_empty(400)
+                self.refuse_form(self.send_empty)
                 return
             line = form.get("line", [""])[0]
             if not re.fullmatch(r"[0-9]*", line):
@@ -176,6 +182,9 @@ def make_server(
                 self.send_empty(404)
                 return
             worktrees = list_worktrees(root)  # one git call for both uses
+            if worktrees is None:  # git failed: the wrapper shows its snackbar
+                self.send_empty(500)
+                return
             worktree = initiative_worktree(root, page_rel.parts[0], worktrees)
             if worktree is None:
                 self.send_empty(404)
@@ -220,15 +229,61 @@ def make_server(
             return self.is_own_host() and self.headers.get("Origin") in origins
 
         def read_form(self) -> dict[str, list[str]] | None:
-            """The urlencoded body, or None if its size is missing or too big."""
+            """The urlencoded body, or None if its size is missing or too big,
+            or it doesn't all arrive. If it timed out, `body_timed_out` is set."""
+            self.body_timed_out = False
             try:
                 length = int(self.headers.get("Content-Length", ""))
             except ValueError:
                 return None
             if length < 0 or length > MAX_FORM_BYTES:
                 return None
-            body = self.rfile.read(length).decode("utf-8", errors="replace")
-            return parse_qs(body)
+            body = self.read_body(length)
+            if body is None:
+                self.close_connection = True
+                return None
+            return parse_qs(body.decode("utf-8", errors="replace"))
+
+        def read_body(self, length: int) -> bytes | None:
+            """Exactly `length` bytes of body, or None if they don't all
+            arrive before REQUEST_DEADLINE or the client goes away.
+            Sets `body_timed_out` when the deadline or a socket timeout hit."""
+            deadline = time.monotonic() + REQUEST_DEADLINE
+            chunks = []
+            received = 0
+            try:
+                while received < length:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self.body_timed_out = True
+                        return None
+                    # Each read waits at most until the deadline.
+                    self.connection.settimeout(min(remaining, self.timeout))
+                    # read1: at most one socket read, so the timeout above holds.
+                    chunk = self.rfile.read1(length - received)
+                    if not chunk:  # client closed early
+                        return None
+                    chunks.append(chunk)
+                    received += len(chunk)
+            except TimeoutError:
+                self.body_timed_out = True
+                return None
+            except OSError:  # e.g. connection reset
+                return None
+            finally:
+                self.connection.settimeout(self.timeout)
+            return b"".join(chunks)
+
+        def refuse_form(self, send: Callable[[int], None]):
+            """Answer a bad form with 400, using `send` (send_error or
+            send_empty). After a body timeout, send nothing: the connection
+            just closes, and the client may be gone anyway."""
+            if self.body_timed_out:
+                return
+            try:
+                send(400)
+            except OSError:  # client already gone
+                self.close_connection = True
 
         def serve_file(self, rel: str, framed: bool = False):
             """A file under `_bmad-output/`. A walkthrough page is served as a

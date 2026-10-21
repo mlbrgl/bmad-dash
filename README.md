@@ -3,7 +3,7 @@
 A small local dashboard for a BMad project. It lists every
 `_bmad-output/initiative-*` with its title and the worktree(s) and branch
 working on it, read from each worktree's `_bmad/custom/config.user.toml`
-(`[core] active_initiative`). Initiatives no worktree points at show "none".
+(`[core] active_initiative`). Initiatives no worktree points at show "no worktree".
 
 It only reads the project, binds `127.0.0.1` only, and rebuilds the page on
 every request.
@@ -24,7 +24,7 @@ failed". Items untouched for 14 days are stale. Rows are sorted newest
 activity first. Initiatives whose file has `status: done` or `dropped` sit
 behind "Show finished (n)"; one with nothing open and no such status says
 `confirm close or add work`.
-Expand a row to see its forges, specs and epics.
+Expand a row to see its forges, specs, walkthroughs and epics.
 
 `/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
 relative to `_bmad-output/`. A missing path or one outside `_bmad-output/` gets

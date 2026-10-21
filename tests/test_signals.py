@@ -172,3 +172,24 @@ def test_tie_is_judged_to_the_minute(initiative):
     write_plan(initiative, "story-a-plan.md", T_NEW.replace(second=30))
     activity = last_activity(initiative, [])
     assert (activity.source, activity.when) == ("memlog", T_NEW)
+
+
+@pytest.mark.parametrize("failure", [
+    subprocess.CompletedProcess([], 128, "", "fatal"),
+    subprocess.TimeoutExpired("git", 10),
+    FileNotFoundError("git"),
+    UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+])
+def test_git_log_failure_gives_no_commit(tmp_path, monkeypatch, failure):
+    from bmad_dash import commands
+    from bmad_dash.signals import last_commit
+
+    repo = make_repo(tmp_path / "repo", T_OLD, "old commit")
+
+    def run(args, **kwargs):
+        if isinstance(failure, BaseException):
+            raise failure
+        return failure
+
+    monkeypatch.setattr(commands.subprocess, "run", run)
+    assert last_commit(repo) is None
