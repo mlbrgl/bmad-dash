@@ -306,7 +306,6 @@ def test_walkthrough_html_and_narrative(initiative):
     assert item.path == "initiative-x/walkthrough-a/walkthrough-a.html"
     assert item.report == "initiative-x/walkthrough-a/walkthrough-a.md"
     assert item.report_label == "md"
-    assert item.word == "2/9 blocks"
     assert item.state == OPEN
 
 
@@ -317,25 +316,67 @@ def test_walkthrough_narrative_only(initiative):
     assert item.report is None
 
 
-def test_walkthrough_all_checked_is_done_and_never_stale(initiative):
+def test_walkthrough_all_checked_has_no_status_word_and_is_open(initiative):
+    make_walkthrough(initiative, "walkthrough-a", blocks(9, 9))
+    item = only(build_tree(initiative, [], NOW))
+    assert item.word == ""
+    assert item.state == OPEN
+
+
+def test_walkthrough_some_checked_has_no_status_word(initiative):
+    make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    item = only(build_tree(initiative, [], NOW))
+    assert item.word == ""
+    assert item.state == OPEN
+
+
+def test_walkthrough_all_checked_but_old_is_stale(initiative):
     folder = make_walkthrough(initiative, "walkthrough-a", blocks(9, 9))
     set_mtime(folder, NOW - timedelta(days=20))
-    item = only(build_tree(initiative, [], NOW))
-    assert item.word == "done"
-    assert item.state == FINISHED
+    assert only(build_tree(initiative, [], NOW)).state == STALE
 
 
-def test_walkthrough_none_checked(initiative):
-    make_walkthrough(initiative, "walkthrough-a", blocks(0, 9))
-    assert only(build_tree(initiative, [], NOW)).word == "0/9 blocks"
+def test_walkthrough_stale_when_commit_is_newer(initiative):
+    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    set_mtime(folder, NOW - timedelta(days=2))
+    item = only(build_tree(initiative, [], NOW, NOW - timedelta(days=1)))
+    assert item.state == STALE
 
 
-def test_walkthrough_counts_top_list_only(initiative):
-    narrative = blocks(1, 9) + "".join(
-        f"\n## Block {i}\n\n- [x] Block {i} visited\n\ntext\n" for i in range(1, 10)
-    )
-    make_walkthrough(initiative, "walkthrough-a", narrative)
-    assert only(build_tree(initiative, [], NOW)).word == "1/9 blocks"
+def test_walkthrough_open_when_folder_is_newer_than_commit(initiative):
+    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    set_mtime(folder, NOW - timedelta(days=1))
+    item = only(build_tree(initiative, [], NOW, NOW - timedelta(days=2)))
+    assert item.state == OPEN
+
+
+def test_walkthrough_open_when_commit_equals_updated(initiative):
+    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    set_mtime(folder, NOW - timedelta(days=1))
+    item = only(build_tree(initiative, [], NOW, NOW - timedelta(days=1)))
+    assert item.state == OPEN
+
+
+def test_walkthrough_old_folder_with_older_commit_is_stale(initiative):
+    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    set_mtime(folder, NOW - timedelta(days=14))
+    item = only(build_tree(initiative, [], NOW, NOW - timedelta(days=30)))
+    assert item.state == STALE
+
+
+def test_walkthrough_without_commit_uses_age_only(initiative):
+    # No worktree or git failed: last_commit is None.
+    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    set_mtime(folder, NOW - timedelta(days=2))
+    assert only(build_tree(initiative, [], NOW, None)).state == OPEN
+
+
+def test_walkthrough_at_epic_level_stale_when_commit_is_newer(initiative):
+    epic = make_folder(initiative, "epic-x")
+    folder = make_walkthrough(epic, "walkthrough-b", blocks(0, 2))
+    set_mtime(folder, NOW - timedelta(days=2))
+    epic_row = only(build_tree(initiative, [], NOW, NOW - timedelta(days=1)))
+    assert only(epic_row.children).state == STALE
 
 
 def test_walkthrough_without_checkboxes(initiative):

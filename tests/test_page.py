@@ -190,19 +190,20 @@ def test_forge_report_link():
 def walkthrough(state="open") -> TreeItem:
     return TreeItem("walk", "walkthrough-a",
                     "initiative-a/walkthrough-a/walkthrough-a.html",
-                    NOW - timedelta(days=1), state, word="2/9 blocks",
+                    NOW - timedelta(days=1), state,
                     report="initiative-a/walkthrough-a/walkthrough-a.md",
                     report_label="md")
 
 
-def test_walkthrough_md_link_and_blocks_word():
+def test_walkthrough_md_link_and_no_status_word():
     initiative = tree_initiative()
     initiative.tree.insert(1, walkthrough())
     row = rows_of(render([initiative]))[2]
     assert ('<a class="name-link" href="/file/initiative-a/walkthrough-a/walkthrough-a.html">'
             'walkthrough-a</a><a class="report-link" '
             'href="/file/initiative-a/walkthrough-a/walkthrough-a.md">md</a>') in row
-    assert '<span role="cell" class="st-pending">2/9 blocks</span>' in row
+    assert "blocks" not in row
+    assert '<span role="cell" class="st-' not in row
     assert '<span role="cell" class="t-kind">walk</span>' in row
 
 

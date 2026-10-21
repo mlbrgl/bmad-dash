@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from bmad_dash.signals import Activity, last_activity
+from bmad_dash.signals import Activity, last_activity, worktree_commits
 from bmad_dash.tree import TreeItem, build_tree, frontmatter, load_tickets
 
 
@@ -111,13 +111,16 @@ def make_initiative(
     root: Path, initiative_dir: Path, worktrees: list[Worktree], now: datetime
 ) -> Initiative:
     tickets = load_tickets(root, initiative_dir)
+    # One git call, shared by the tree (walkthrough staleness) and Last activity.
+    commits = worktree_commits(worktrees)
+    last_commit = max((c.when for c in commits), default=None)
     return Initiative(
         slug=initiative_dir.name,
         title=read_title(initiative_dir),
         worktrees=worktrees,
         tickets=tickets,
-        tree=build_tree(initiative_dir, tickets, now),
-        activity=last_activity(initiative_dir, worktrees),
+        tree=build_tree(initiative_dir, tickets, now, last_commit),
+        activity=last_activity(initiative_dir, worktrees, commits),
         status=frontmatter(initiative_dir / f"{initiative_dir.name}.md").get("status", ""),
     )
 

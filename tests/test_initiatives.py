@@ -1,8 +1,11 @@
+import os
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from conftest import write_initiative
 
 from bmad_dash.initiatives import Worktree, active_initiative, list_initiatives
+from bmad_dash.tree import OPEN, STALE
 
 
 def by_slug(root: Path) -> dict:
@@ -59,3 +62,27 @@ def test_status_read_from_initiative_frontmatter(project):
     assert initiatives["initiative-gone"].finished
     assert initiatives["initiative-matched"].status == ""
     assert not initiatives["initiative-nofile"].finished
+
+
+def test_worktree_commit_makes_older_walkthrough_stale(project):
+    # The worktree's commit is from now; the walkthrough was touched 2 days ago.
+    folder = project / "_bmad-output" / "initiative-matched" / "walkthrough-a"
+    folder.mkdir()
+    (folder / "walkthrough-a.md").write_text("# W\n")
+    stamp = (datetime.now() - timedelta(days=2)).timestamp()
+    os.utime(folder / "walkthrough-a.md", (stamp, stamp))
+
+    initiatives = by_slug(project)
+    matched = initiatives["initiative-matched"]
+    assert matched.tree[0].state == STALE
+    assert matched.activity.source == "commit"
+
+
+def test_no_worktree_walkthrough_uses_age_only(project):
+    folder = project / "_bmad-output" / "initiative-orphan" / "walkthrough-a"
+    folder.mkdir()
+    (folder / "walkthrough-a.md").write_text("# W\n")
+    stamp = (datetime.now() - timedelta(days=2)).timestamp()
+    os.utime(folder / "walkthrough-a.md", (stamp, stamp))
+
+    assert by_slug(project)["initiative-orphan"].tree[0].state == OPEN

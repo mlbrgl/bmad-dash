@@ -87,17 +87,28 @@ def last_commit(worktree_path: Path) -> Activity | None:
     return Activity(when, subject, "commit")
 
 
-def last_activity(initiative_dir: Path, worktrees: list) -> Activity | None:
-    """The newest activity of the initiative, or None when there is none.
-
-    `worktrees` are the initiative's matched worktrees (anything with `.path`).
-    """
-    # Order matters for ties: memlogs first, then plans, then commits.
-    candidates = memlog_activities(initiative_dir) + plan_activities(initiative_dir)
+def worktree_commits(worktrees: list) -> list[Activity]:
+    """The last commit of each worktree (anything with `.path`), skipping git failures."""
+    commits = []
     for worktree in worktrees:
         commit = last_commit(worktree.path)
         if commit is not None:
-            candidates.append(commit)
+            commits.append(commit)
+    return commits
+
+
+def last_activity(
+    initiative_dir: Path, worktrees: list, commits: list[Activity] | None = None
+) -> Activity | None:
+    """The newest activity of the initiative, or None when there is none.
+
+    `worktrees` are the initiative's matched worktrees (anything with `.path`).
+    Pass `commits` from `worktree_commits` to skip calling git again.
+    """
+    if commits is None:
+        commits = worktree_commits(worktrees)
+    # Order matters for ties: memlogs first, then plans, then commits.
+    candidates = memlog_activities(initiative_dir) + plan_activities(initiative_dir) + commits
 
     newest = None
     for activity in candidates:
