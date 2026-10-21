@@ -82,7 +82,7 @@ def tree_initiative(tickets: list[dict] | None = [], slug="initiative-a") -> Ini
                                     NOW - timedelta(days=20), True),
                              Ticket("1.2", "Old", "done", None,
                                     NOW - timedelta(days=30), False)],
-                    done=1, total=2, word="in progress")
+                    word="in progress")
     forge = TreeItem("forge", "forge-a", None, None, "stale")
     return Initiative(slug, "A", [], tickets=tickets, tree=[forge, epic])
 
@@ -218,7 +218,6 @@ def test_stale_walkthrough_shows_stale_tag():
 def test_tree_without_tickets_shows_note_first():
     initiative = tree_initiative(tickets=None)
     epic = initiative.tree[1]
-    epic.done = epic.total = None
     epic.tickets, epic.word = [], ""
     html = render([initiative])
     panel = html.split('<div class="panel" role="cell"')[1]

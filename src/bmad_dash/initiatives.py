@@ -29,7 +29,7 @@ class Initiative:
     # At most one: the first worktree `git worktree list` gives that claims
     # this initiative. Kept a list so empty and present read the same everywhere.
     worktrees: list[Worktree] = field(default_factory=list)
-    # From one `tickets.py status` call; None when it failed. Reused by later columns.
+    # From one `tickets.py status` call; None when it failed. Shared by the tree and Status.
     tickets: list[dict] | None = None
     tree: list[TreeItem] = field(default_factory=list)
     activity: Activity | None = None
@@ -87,24 +87,17 @@ def active_initiative(worktree_path: Path) -> str | None:
     return slug if isinstance(slug, str) and slug else None
 
 
-def read_title(initiative_dir: Path) -> str:
-    """The `title:` from the initiative file's frontmatter, or the folder name."""
-    slug = initiative_dir.name
-    initiative_file = initiative_dir / f"{slug}.md"
-    try:
-        lines = initiative_file.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
-        return slug
+def initiative_fields(initiative_dir: Path) -> dict[str, str]:
+    """The initiative file's frontmatter; empty when unreadable or missing."""
+    return frontmatter(initiative_dir / f"{initiative_dir.name}.md")
 
-    if not lines or lines[0].strip() != "---":
-        return slug
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break  # end of frontmatter
-        if line.startswith("title:"):
-            title = line.removeprefix("title:").strip().strip("\"'")
-            return title or slug
-    return slug
+
+def read_title(initiative_dir: Path, fields: dict[str, str] | None = None) -> str:
+    """The `title:` from the initiative file's frontmatter, or the folder name.
+    Pass `fields` from `initiative_fields` to skip reading the file again."""
+    if fields is None:
+        fields = initiative_fields(initiative_dir)
+    return fields.get("title") or initiative_dir.name
 
 
 def make_initiative(
@@ -114,31 +107,40 @@ def make_initiative(
     # One git call, shared by the tree (walkthrough staleness) and Last activity.
     commits = worktree_commits(worktrees)
     last_commit = max((c.when for c in commits), default=None)
+    fields = initiative_fields(initiative_dir)  # read once, for title and status
     return Initiative(
         slug=initiative_dir.name,
-        title=read_title(initiative_dir),
+        title=read_title(initiative_dir, fields),
         worktrees=worktrees,
         tickets=tickets,
         tree=build_tree(initiative_dir, tickets, now, last_commit),
         activity=last_activity(initiative_dir, worktrees, commits),
-        status=frontmatter(initiative_dir / f"{initiative_dir.name}.md").get("status", ""),
+        status=fields.get("status", ""),
     )
 
 
-def worktrees_by_slug(root: Path) -> dict[str, Worktree]:
+def worktrees_by_slug(
+    root: Path, worktrees: list[Worktree] | None = None
+) -> dict[str, Worktree]:
     """Initiative slug -> the worktree working on it.
-    One worktree per initiative: the first one `git worktree list` gives wins."""
+    One worktree per initiative: the first one `git worktree list` gives wins.
+    Pass `worktrees` from `list_worktrees` to skip calling git again."""
+    if worktrees is None:
+        worktrees = list_worktrees(root)
     claimed: dict[str, Worktree] = {}
-    for worktree in list_worktrees(root):
+    for worktree in worktrees:
         slug = active_initiative(worktree.path)
         if slug and slug not in claimed:
             claimed[slug] = worktree
     return claimed
 
 
-def initiative_worktree(root: Path, slug: str) -> Worktree | None:
-    """The worktree working on initiative `slug`, or None if none claims it."""
-    return worktrees_by_slug(root).get(slug)
+def initiative_worktree(
+    root: Path, slug: str, worktrees: list[Worktree] | None = None
+) -> Worktree | None:
+    """The worktree working on initiative `slug`, or None if none claims it.
+    Pass `worktrees` from `list_worktrees` to skip calling git again."""
+    return worktrees_by_slug(root, worktrees).get(slug)
 
 
 def list_initiatives(root: Path, now: datetime | None = None) -> list[Initiative]:

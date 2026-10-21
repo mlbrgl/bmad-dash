@@ -1,12 +1,15 @@
 import http.client
+import socket
 import subprocess
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 
 import pytest
 
+import bmad_dash.server as server_module
 from bmad_dash.server import make_server
 
 
@@ -208,3 +211,38 @@ def test_get_with_foreign_host_is_403(files_server, path):
     response, _ = raw_get(files_server, path, host="evil.example:80")
     assert response.status == 403
 
+
+def test_short_body_times_out_and_server_keeps_serving(project, monkeypatch):
+    # A POST that sends less body than its Content-Length must not hold its
+    # thread forever: the socket timeout closes it, and no command runs.
+    monkeypatch.setattr(server_module, "REQUEST_TIMEOUT", 0.5)
+    launched = []
+    server = make_server(project, 0, launch=launched.append)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_port
+    try:
+        stalled = socket.create_connection(("127.0.0.1", port))
+        stalled.settimeout(5)
+        stalled.sendall(
+            b"POST /vscode HTTP/1.1\r\n"
+            + f"Host: 127.0.0.1:{port}\r\n".encode()
+            + f"Origin: http://127.0.0.1:{port}\r\n".encode()
+            + b"Content-Type: application/x-www-form-urlencoded\r\n"
+            + b"Content-Length: 100\r\n\r\n"
+            + b"id=abc&slu"  # 10 of the 100 bytes, then nothing
+        )
+        started = time.monotonic()
+
+        # Another request is answered while the first one is stalled.
+        response, _ = raw_get(server, "/no-such-page")
+        assert response.status == 404
+
+        # The stalled connection is closed by the server, with no response.
+        assert stalled.recv(1024) == b""
+        assert time.monotonic() - started >= 0.4
+        stalled.close()
+        assert launched == []
+    finally:
+        server.shutdown()
+        server.server_close()

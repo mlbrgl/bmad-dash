@@ -13,8 +13,7 @@ from urllib.parse import quote, urlencode
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.prs import PullRequest, last_pr
-from bmad_dash.signals import ticket_counts
-from bmad_dash.tree import FINISHED, STALE, STALE_AFTER, Ticket, TreeItem, status_word
+from bmad_dash.tree import FINISHED, STALE, Ticket, TreeItem, is_old, status_word, ticket_counts
 
 
 def display_path(path: Path) -> str:
@@ -233,7 +232,7 @@ def is_stale(initiative: Initiative, now: datetime) -> bool:
     """Last activity is STALE_AFTER old or older. Finished initiatives never are."""
     activity = initiative.activity
     return (not initiative.finished and activity is not None
-            and now - activity.when >= STALE_AFTER)
+            and is_old(activity.when, now))
 
 
 def has_open(items: list[TreeItem], kind: str) -> bool:
@@ -519,7 +518,7 @@ form.vscode + form.vscode { margin-top: 6px; }
 .t-name { display: flex; align-items: baseline; min-width: 0; }
 .name-link, .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis;
                          white-space: nowrap; }
-.d1 { padding-left: 20px; } .d2 { padding-left: 40px; } .d3 { padding-left: 60px; }
+.d1 { padding-left: 20px; } .d2 { padding-left: 40px; }
 .name-link { color: var(--ink); }
 .report-link { flex: none; color: var(--ink-muted); margin-left: 8px; font-size: 12px; }
 .st-pending { color: var(--accent); }

@@ -29,6 +29,9 @@ from bmad_dash.prs import fetch_prs
 
 HOST = "127.0.0.1"
 MAX_FORM_BYTES = 1024
+# Seconds a connection may sit idle, e.g. a POST that sends less body than
+# its Content-Length. Then the connection closes and the thread is freed.
+REQUEST_TIMEOUT = 10
 
 
 def validate_root(root: Path) -> str | None:
@@ -46,25 +49,24 @@ def validate_root(root: Path) -> str | None:
     return None
 
 
-def default_launch(path: Path) -> None:
-    """Open (or focus) a VS Code window on `path`. Does not wait."""
+def _run_code(args: list[str]) -> None:
+    """Run `code <args>` with no shell and no output. Does not wait."""
     subprocess.Popen(
-        ["code", "-n", str(path)],
+        ["code", *args],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+
+
+def default_launch(path: Path) -> None:
+    """Open (or focus) a VS Code window on `path`. Does not wait."""
+    _run_code(["-n", str(path)])
 
 
 def default_open_file(path: Path, line: str) -> None:
     """Open `path` in VS Code, at `line` when given. Does not wait."""
-    arg = f"{path}:{line}" if line else str(path)
-    subprocess.Popen(
-        ["code", "-g", arg],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    _run_code(["-g", f"{path}:{line}" if line else str(path)])
 
 
 def make_server(
@@ -78,6 +80,9 @@ def make_server(
     output_base = (root / "_bmad-output").resolve()
 
     class Handler(BaseHTTPRequestHandler):
+        # Socket timeout for each connection (from StreamRequestHandler).
+        timeout = REQUEST_TIMEOUT
+
         def do_GET(self):
             if not self.is_own_host():
                 self.send_error(403)
@@ -170,11 +175,12 @@ def make_server(
             if not is_walkthrough_page(page_rel):
                 self.send_empty(404)
                 return
-            worktree = initiative_worktree(root, page_rel.parts[0])
+            worktrees = list_worktrees(root)  # one git call for both uses
+            worktree = initiative_worktree(root, page_rel.parts[0], worktrees)
             if worktree is None:
                 self.send_empty(404)
                 return
-            others = [w.path for w in list_worktrees(root)]
+            others = [w.path for w in worktrees]
             target = resolve_open_path(worktree.path, form.get("path", [""])[0], others)
             if target is None:
                 self.send_empty(404)

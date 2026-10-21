@@ -33,14 +33,14 @@ RELAY_SCRIPT = """
     } catch (e) {}
     // An unreadable link still reaches the wrapper, which then says it failed.
     parent.postMessage({
-      type: "bmad-dash:open-file",
+      type: "%MESSAGE_TYPE%",
       path: match ? match[1] : "",
       line: match && match[2] ? match[2] : ""
     }, "*");
   }, true);
 })();
 </script>
-"""
+""".replace("%MESSAGE_TYPE%", MESSAGE_TYPE)  # .format() would need every JS brace doubled
 
 # Snackbar: fixed bottom-centre, ink background, surface text, rounded.md, 14px.
 WRAPPER_TEMPLATE = """<!doctype html>

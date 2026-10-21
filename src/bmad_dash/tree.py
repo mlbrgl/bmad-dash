@@ -10,6 +10,7 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
 - Epic: finished when it has tickets and every non-dropped one is `done`, else open.
 - Any open item untouched for `STALE_AFTER` is stale instead. Finished is never stale.
 - Ticket: stale when not done or dropped and untouched for `STALE_AFTER`.
+- Ticket counts: done/total, dropped tickets counted in neither.
 """
 
 import json
@@ -44,8 +45,6 @@ class TreeItem:
     state: str  # OPEN, FINISHED or STALE
     children: list["TreeItem"] = field(default_factory=list)
     tickets: list[Ticket] = field(default_factory=list)  # epics only
-    done: int | None = None  # epics only; None when tickets are unavailable
-    total: int | None = None  # epics only; None when tickets are unavailable
     # Epics: "done", "in progress", or "" when no counted tickets.
     # Walkthroughs: always "".
     word: str = ""
@@ -148,9 +147,23 @@ def newest_mtime(folder: Path) -> datetime | None:
     return datetime.fromtimestamp(max(times))
 
 
+def is_old(updated: datetime, now: datetime) -> bool:
+    """Untouched for STALE_AFTER or longer."""
+    return now - updated >= STALE_AFTER
+
+
+def ticket_counts(tickets: list[dict] | None) -> tuple[int, int] | None:
+    """(done, total) with dropped tickets in neither; None when tickets are unavailable."""
+    if tickets is None:
+        return None
+    counted = [t for t in tickets if t.get("state") != "dropped"]
+    done = sum(1 for t in counted if t.get("state") == "done")
+    return done, len(counted)
+
+
 def with_staleness(state: str, updated: datetime | None, now: datetime) -> str:
     """Open items untouched for STALE_AFTER become stale."""
-    if state == OPEN and updated is not None and now - updated >= STALE_AFTER:
+    if state == OPEN and updated is not None and is_old(updated, now):
         return STALE
     return state
 
@@ -281,7 +294,7 @@ def make_ticket(
         word=status_word(state),
         path=file.relative_to(output_dir).as_posix() if file else None,
         updated=updated,
-        stale=open_ticket and updated is not None and now - updated >= STALE_AFTER,
+        stale=open_ticket and updated is not None and is_old(updated, now),
     )
 
 
@@ -297,14 +310,12 @@ def epic_item(
 
     if tickets is None:
         # Tickets unavailable: counts unknown, so we can't call it finished.
-        epic_tickets, done, total = [], None, None
+        epic_tickets = []
         state = OPEN
         word = ""
     else:
         raw_tickets = [t for t in tickets if t.get("epic") == folder.name]
-        counted = [t for t in raw_tickets if t.get("state") != "dropped"]
-        done = sum(1 for t in counted if t.get("state") == "done")
-        total = len(counted)
+        done, total = ticket_counts(raw_tickets)
         finished = total > 0 and done == total
         state = FINISHED if finished else OPEN
         word = "" if total == 0 else ("done" if finished else "in progress")
@@ -319,8 +330,6 @@ def epic_item(
         state=with_staleness(state, updated, now),
         children=children,
         tickets=epic_tickets,
-        done=done,
-        total=total,
         word=word,
     )
 
@@ -343,8 +352,3 @@ def build_tree(
         for d in sub_dirs(initiative_dir, "epic-")
     ]
     return doc_items(initiative_dir, output_dir, now, last_commit) + epics
-
-
-def count_items(items: list[TreeItem]) -> int:
-    """Number of items in the tree, nested ones included (tickets excluded)."""
-    return sum(1 + count_items(item.children) for item in items)

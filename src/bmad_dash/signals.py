@@ -1,4 +1,4 @@
-"""Row signals: last activity, tickets done/total.
+"""Row signal: last activity.
 
 Rules (from `dashboard-status-rules.md`), structural signals only:
 
@@ -6,7 +6,6 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
   the mtime of any `*-plan.md` under it, and the last commit on each matched
   worktree. Ties go to the memlog, then the plan, then the commit.
   The text is display only: never derive state from it.
-- Tickets: done/total, dropped tickets counted in neither.
 """
 
 import subprocess
@@ -14,7 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from bmad_dash.tree import read_memlog
+from bmad_dash.files import split_frontmatter
+from bmad_dash.tree import file_mtime, read_memlog
 
 
 @dataclass
@@ -27,19 +27,12 @@ class Activity:
 def last_bullet(memlog: Path) -> str:
     """The last body line starting with `- `, prefix stripped, or ""."""
     try:
-        lines = memlog.read_text(encoding="utf-8").splitlines()
+        text = memlog.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return ""
 
-    # Skip the frontmatter, if any.
-    body = lines
-    if lines and lines[0].strip() == "---":
-        for i, line in enumerate(lines[1:], start=1):
-            if line.strip() == "---":
-                body = lines[i + 1:]
-                break
-
-    bullets = [line for line in body if line.startswith("- ")]
+    _, body = split_frontmatter(text)  # skip the frontmatter, if any
+    bullets = [line for line in body.splitlines() if line.startswith("- ")]
     if not bullets:
         return ""
     return bullets[-1].removeprefix("- ").strip()
@@ -57,11 +50,10 @@ def memlog_activities(initiative_dir: Path) -> list[Activity]:
 def plan_activities(initiative_dir: Path) -> list[Activity]:
     activities = []
     for plan in sorted(initiative_dir.rglob("*-plan.md")):
-        try:
-            mtime = plan.stat().st_mtime
-        except OSError:
+        mtime = file_mtime(plan)
+        if mtime is None:
             continue
-        activities.append(Activity(datetime.fromtimestamp(mtime), plan.name, "plan"))
+        activities.append(Activity(mtime, plan.name, "plan"))
     return activities
 
 
@@ -121,12 +113,3 @@ def last_activity(
 
 def to_minute(when: datetime) -> datetime:
     return when.replace(second=0, microsecond=0)
-
-
-def ticket_counts(tickets: list[dict] | None) -> tuple[int, int] | None:
-    """(done, total) with dropped tickets in neither; None when tickets are unavailable."""
-    if tickets is None:
-        return None
-    counted = [t for t in tickets if t.get("state") != "dropped"]
-    done = sum(1 for t in counted if t.get("state") == "done")
-    return done, len(counted)

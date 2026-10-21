@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from bmad_dash.initiatives import list_initiatives
+from bmad_dash.initiatives import list_initiatives, read_title
 from bmad_dash.page import render_page
+from bmad_dash.signals import last_bullet
 from bmad_dash.tree import (
     FINISHED,
     OPEN,
@@ -129,7 +130,6 @@ def test_epic_all_done_is_finished(initiative):
     tickets = [ticket("1.1", "done"), ticket("1.2", "done"), ticket("2.1", "backlog", "epic-y")]
     item = only(build_tree(initiative, tickets, NOW))
     assert item.state == FINISHED
-    assert (item.done, item.total) == (2, 2)
     assert [t.ref for t in item.tickets] == ["1.1", "1.2"]
     assert item.word == "done"
 
@@ -139,7 +139,6 @@ def test_epic_partly_done_skips_dropped(initiative):
     tickets = [ticket("1.1", "done"), ticket("1.2", "dropped"), ticket("1.3", "review")]
     item = only(build_tree(initiative, tickets, NOW))
     assert item.state == OPEN
-    assert (item.done, item.total) == (1, 2)
     assert item.word == "in progress"
     assert [t.word for t in item.tickets] == ["done", "dropped", "review"]
 
@@ -148,7 +147,6 @@ def test_epic_without_tickets_is_open_zero_of_zero(initiative):
     make_folder(initiative, "epic-x")
     item = only(build_tree(initiative, [], NOW))
     assert item.state == OPEN
-    assert (item.done, item.total) == (0, 0)
     assert item.word == ""
 
 
@@ -168,7 +166,6 @@ def test_open_epic_uses_file_mtime_for_staleness(initiative):
 def test_epic_counts_unknown_when_tickets_unavailable(initiative):
     make_folder(initiative, "epic-x")
     item = only(build_tree(initiative, None, NOW))
-    assert (item.done, item.total) == (None, None)
     assert item.state == OPEN
     assert item.word == "" and item.tickets == []
 
@@ -495,3 +492,51 @@ def test_failing_tickets_py_shows_unavailable_on_page(tmp_path):
 
     html = render_page(list_initiatives(root, now=NOW), root)
     assert "tickets unavailable" in html
+
+
+# --- frontmatter edge cases (shared `split_frontmatter`) ---
+
+
+def test_last_bullet_without_frontmatter(tmp_path):
+    memlog = tmp_path / ".memlog.md"
+    memlog.write_text("- first\n- last one\n")
+    assert last_bullet(memlog) == "last one"
+
+
+def test_last_bullet_without_closing_dashes_reads_it_all_as_body(tmp_path):
+    memlog = tmp_path / ".memlog.md"
+    memlog.write_text("---\nstatus: open\n- a bullet\n")
+    assert last_bullet(memlog) == "a bullet"
+
+
+def test_last_bullet_skips_frontmatter_bullets(tmp_path):
+    memlog = tmp_path / ".memlog.md"
+    memlog.write_text("---\ntags:\n- in frontmatter\n---\n- in body\n")
+    assert last_bullet(memlog) == "in body"
+
+
+def write_initiative_file(tmp_path: Path, text: str) -> Path:
+    folder = tmp_path / "initiative-z"
+    folder.mkdir()
+    (folder / "initiative-z.md").write_text(text)
+    return folder
+
+
+def test_read_title_without_frontmatter_is_folder_name(tmp_path):
+    folder = write_initiative_file(tmp_path, "title: Not frontmatter\n# Heading\n")
+    assert read_title(folder) == "initiative-z"
+
+
+def test_read_title_without_closing_dashes_reads_to_end_of_file(tmp_path):
+    folder = write_initiative_file(tmp_path, "---\ntitle: Never closed\n")
+    assert read_title(folder) == "Never closed"
+
+
+def test_read_title_empty_is_folder_name(tmp_path):
+    folder = write_initiative_file(tmp_path, "---\ntitle: \"\"\n---\n")
+    assert read_title(folder) == "initiative-z"
+
+
+def test_read_title_from_frontmatter(tmp_path):
+    folder = write_initiative_file(tmp_path, "---\ntitle: 'My initiative'\n---\n")
+    assert read_title(folder) == "My initiative"

@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from bmad_dash.initiatives import Worktree, list_initiatives
-from bmad_dash.signals import last_activity, ticket_counts
+from bmad_dash.signals import last_activity
+from bmad_dash.tree import ticket_counts
 
 T_OLD = datetime(2026, 10, 1, 9, 0)
 T_MID = datetime(2026, 10, 5, 9, 0)
