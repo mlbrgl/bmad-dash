@@ -32,6 +32,14 @@ link; a missing path or one outside `_bmad-output/` gets a plain 404 page with
 the same link. Served files
 are sandboxed, so they can't trigger VS Code.
 
+Walkthrough pages (`initiative-*/.../walkthrough-*/*.html`) are shown inside
+a small dashboard wrapper page that frames the walkthrough (`?frame=1`, still
+sandboxed). Their `vscode://file/<path>[:<line>]` links then run `code -g
+<path>:<line>`, also in the Claude desktop browser pane: the framed page
+passes the click to the wrapper, which POSTs it to `/open-file`. Only
+existing files inside that initiative's worktree open; otherwise the page
+shows "Couldn't open in VS Code".
+
 Each initiative shows at most one worktree: the first one `git worktree list`
 gives whose config names it. Click the caret to show a row's tree.
 

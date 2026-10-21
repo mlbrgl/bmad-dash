@@ -1,6 +1,7 @@
 """Local HTTP server for the dashboard. Binds 127.0.0.1 only."""
 
 import argparse
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -10,7 +11,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from bmad_dash.files import NotFound, Refused, not_found_page, render_markdown, resolve_file
-from bmad_dash.initiatives import list_initiatives, list_worktrees, worktree_id
+from bmad_dash.initiatives import (
+    initiative_worktree,
+    list_initiatives,
+    list_worktrees,
+    worktree_id,
+)
+from bmad_dash.opener import (
+    inject_relay,
+    is_walkthrough_page,
+    read_title,
+    resolve_open_path,
+    wrapper_page,
+)
 from bmad_dash.page import render_page
 from bmad_dash.prs import fetch_prs
 
@@ -43,11 +56,26 @@ def default_launch(path: Path) -> None:
     )
 
 
+def default_open_file(path: Path, line: str) -> None:
+    """Open `path` in VS Code, at `line` when given. Does not wait."""
+    arg = f"{path}:{line}" if line else str(path)
+    subprocess.Popen(
+        ["code", "-g", arg],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def make_server(
-    root: Path, port: int, launch: Callable[[Path], None] = default_launch
+    root: Path,
+    port: int,
+    launch: Callable[[Path], None] = default_launch,
+    open_file: Callable[[Path, str], None] = default_open_file,
 ) -> ThreadingHTTPServer:
     """A server for `root` on 127.0.0.1:`port` (0 picks a free port).
-    `launch` opens a worktree; tests pass a fake."""
+    `launch` opens a worktree and `open_file` opens one file; tests pass fakes."""
+    output_base = (root / "_bmad-output").resolve()
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -56,14 +84,15 @@ def make_server(
                 return
             url = urlsplit(self.path)
             path = url.path
-            if path == "/vscode":
+            if path in ("/vscode", "/open-file"):
                 self.send_response(405)
                 self.send_header("Allow", "POST")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
             if path.startswith("/file/"):
-                self.serve_file(unquote(path.removeprefix("/file/")))
+                framed = parse_qs(url.query).get("frame", [""])[0] == "1"
+                self.serve_file(unquote(path.removeprefix("/file/")), framed)
                 return
             if path != "/":
                 self.send_error(404)
@@ -81,9 +110,16 @@ def make_server(
             self.send_html(body)
 
         def do_POST(self):
-            if urlsplit(self.path).path != "/vscode":
+            path = urlsplit(self.path).path
+            if path == "/vscode":
+                self.open_worktree()
+            elif path == "/open-file":
+                self.open_walkthrough_link()
+            else:
                 self.send_error(404)
-                return
+
+        def open_worktree(self):
+            """The dashboard's worktree cell: `code -n <worktree>`."""
             if not self.is_same_origin():
                 self.send_error(403)
                 return
@@ -105,6 +141,56 @@ def make_server(
                 self.redirect(failed)
                 return
             self.redirect("/")
+
+        def open_walkthrough_link(self):
+            """Open a walkthrough's `vscode://file/` link with `code -g`.
+            Sent by the walkthrough's wrapper page, so same-origin only."""
+            if not self.is_same_origin():
+                self.send_empty(403)
+                return
+            form = self.read_form()
+            if form is None:
+                self.send_empty(400)
+                return
+            line = form.get("line", [""])[0]
+            if not re.fullmatch(r"[0-9]*", line):
+                self.send_empty(400)
+                return
+            # The page decides which worktree a path may come from.
+            page = form.get("page", [""])[0]
+            if not page.startswith("/file/"):
+                self.send_empty(404)
+                return
+            try:
+                page_path = resolve_file(root, unquote(page.removeprefix("/file/")))
+            except (Refused, NotFound):
+                self.send_empty(404)
+                return
+            page_rel = page_path.relative_to(output_base)
+            if not is_walkthrough_page(page_rel):
+                self.send_empty(404)
+                return
+            worktree = initiative_worktree(root, page_rel.parts[0])
+            if worktree is None:
+                self.send_empty(404)
+                return
+            others = [w.path for w in list_worktrees(root)]
+            target = resolve_open_path(worktree.path, form.get("path", [""])[0], others)
+            if target is None:
+                self.send_empty(404)
+                return
+            try:
+                open_file(target, line)
+            except OSError:  # e.g. `code` not on PATH
+                self.send_empty(500)
+                return
+            self.send_empty(204)
+
+        def send_empty(self, status: int):
+            """A response with no body: the wrapper only reads the status."""
+            self.send_response(status)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def redirect(self, location: str):
             """303 See Other, so the browser GETs `location`."""
@@ -138,7 +224,9 @@ def make_server(
             body = self.rfile.read(length).decode("utf-8", errors="replace")
             return parse_qs(body)
 
-        def serve_file(self, rel: str):
+        def serve_file(self, rel: str, framed: bool = False):
+            """A file under `_bmad-output/`. A walkthrough page is served as a
+            wrapper page that frames it; `framed` serves the walkthrough itself."""
             try:
                 target = resolve_file(root, rel)
             except (Refused, NotFound):
@@ -150,9 +238,26 @@ def make_server(
                 body = render_markdown(target).encode("utf-8")
             else:
                 body = target.read_bytes()
+            if is_walkthrough_page(target.relative_to(output_base)):
+                if not framed:
+                    # Dashboard code, not project content: no sandbox, so it
+                    # can POST /open-file for links the frame relays to it.
+                    page_path = "/file/" + quote(rel)
+                    wrapper = wrapper_page(page_path, read_title(body, target.name))
+                    # Only the dashboard itself may frame the wrapper.
+                    self.send_html(
+                        wrapper.encode("utf-8"),
+                        {"Content-Security-Policy": "frame-ancestors 'self'"},
+                    )
+                    return
+                body = inject_relay(body)
+                # Only the wrapper (same origin) may frame the walkthrough.
+                csp = "sandbox allow-scripts; frame-ancestors 'self'"
+                self.send_html(body, {"Content-Security-Policy": csp})
+                return
             # Served files are project content, not dashboard code. Sandboxing
-            # gives them an opaque origin, so their requests to /vscode carry
-            # `Origin: null` and are refused.
+            # gives them an opaque origin, so their requests to /vscode and
+            # /open-file carry `Origin: null` and are refused.
             self.send_html(body, {"Content-Security-Policy": "sandbox allow-scripts"})
 
         def send_html(

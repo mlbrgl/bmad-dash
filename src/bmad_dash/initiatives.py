@@ -125,17 +125,28 @@ def make_initiative(
     )
 
 
+def worktrees_by_slug(root: Path) -> dict[str, Worktree]:
+    """Initiative slug -> the worktree working on it.
+    One worktree per initiative: the first one `git worktree list` gives wins."""
+    claimed: dict[str, Worktree] = {}
+    for worktree in list_worktrees(root):
+        slug = active_initiative(worktree.path)
+        if slug and slug not in claimed:
+            claimed[slug] = worktree
+    return claimed
+
+
+def initiative_worktree(root: Path, slug: str) -> Worktree | None:
+    """The worktree working on initiative `slug`, or None if none claims it."""
+    return worktrees_by_slug(root).get(slug)
+
+
 def list_initiatives(root: Path, now: datetime | None = None) -> list[Initiative]:
     """One Initiative per `_bmad-output/initiative-*` folder, sorted by slug,
     each with the first worktree whose config names it, its tickets and its tree."""
     if now is None:
         now = datetime.now()
-    worktrees_by_slug: dict[str, list[Worktree]] = {}
-    for worktree in list_worktrees(root):
-        slug = active_initiative(worktree.path)
-        # One worktree per initiative: the first one git lists wins.
-        if slug and slug not in worktrees_by_slug:
-            worktrees_by_slug[slug] = [worktree]
+    claimed = worktrees_by_slug(root)
 
     initiative_dirs = sorted(
         (p for p in (root / "_bmad-output").glob("initiative-*") if p.is_dir()),
@@ -146,6 +157,8 @@ def list_initiatives(root: Path, now: datetime | None = None) -> list[Initiative
     # map() keeps the slug order.
     with ThreadPoolExecutor(max_workers=8) as pool:
         return list(pool.map(
-            lambda d: make_initiative(root, d, worktrees_by_slug.get(d.name, []), now),
+            lambda d: make_initiative(
+                root, d, [claimed[d.name]] if d.name in claimed else [], now
+            ),
             initiative_dirs,
         ))

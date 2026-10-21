@@ -187,9 +187,12 @@ def test_file_not_served_is_404_page_with_back_link(files_server, path):
 @pytest.mark.parametrize("path", [
     "/file/initiative-x/spec-x/spec-x.md",
     "/file/initiative-x/forge-x/forge-report.html",
+    "/file/initiative-x/spec-x/spec-x.md?frame=1",
+    "/file/initiative-x/forge-x/forge-report.html?frame=1",
 ])
 def test_served_files_are_sandboxed(files_server, path):
     # An opaque origin means a served file can't pass /vscode's Origin check.
+    # Walkthrough pages are the one exception: see test_open_file.py.
     response, _ = raw_get(files_server, path)
     assert response.getheader("Content-Security-Policy") == "sandbox allow-scripts"
 
