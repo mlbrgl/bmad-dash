@@ -277,6 +277,116 @@ def test_forge_report_link(initiative):
     assert reports == ["initiative-x/forge-x/forge-report.html", None]
 
 
+# --- walkthroughs ---
+
+
+def make_walkthrough(
+    parent: Path, name: str, narrative: str | None, html: bool = True
+) -> Path:
+    """A walkthrough folder with its narrative and, optionally, its HTML page."""
+    folder = parent / name
+    folder.mkdir(parents=True)
+    if narrative is not None:
+        (folder / f"{name}.md").write_text(narrative)
+    if html:
+        (folder / f"{name}.html").write_text("<html></html>")
+    (folder / f"{name}-log.md").write_text("- [ ] not counted\n")
+    return folder
+
+
+def blocks(checked: int, total: int) -> str:
+    lines = [f"- [{'x' if i < checked else ' '}] Block {i + 1}" for i in range(total)]
+    return "---\ntitle: w\n---\n# W\n\n**Blocks**\n\n" + "\n".join(lines) + "\n"
+
+
+def test_walkthrough_html_and_narrative(initiative):
+    make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    item = only(build_tree(initiative, [], NOW))
+    assert item.kind == "walk"
+    assert item.path == "initiative-x/walkthrough-a/walkthrough-a.html"
+    assert item.report == "initiative-x/walkthrough-a/walkthrough-a.md"
+    assert item.report_label == "md"
+    assert item.word == "2/9 blocks"
+    assert item.state == OPEN
+
+
+def test_walkthrough_narrative_only(initiative):
+    make_walkthrough(initiative, "walkthrough-a", blocks(2, 9), html=False)
+    item = only(build_tree(initiative, [], NOW))
+    assert item.path == "initiative-x/walkthrough-a/walkthrough-a.md"
+    assert item.report is None
+
+
+def test_walkthrough_all_checked_is_done_and_never_stale(initiative):
+    folder = make_walkthrough(initiative, "walkthrough-a", blocks(9, 9))
+    set_mtime(folder, NOW - timedelta(days=20))
+    item = only(build_tree(initiative, [], NOW))
+    assert item.word == "done"
+    assert item.state == FINISHED
+
+
+def test_walkthrough_none_checked(initiative):
+    make_walkthrough(initiative, "walkthrough-a", blocks(0, 9))
+    assert only(build_tree(initiative, [], NOW)).word == "0/9 blocks"
+
+
+def test_walkthrough_counts_top_list_only(initiative):
+    narrative = blocks(1, 9) + "".join(
+        f"\n## Block {i}\n\n- [x] Block {i} visited\n\ntext\n" for i in range(1, 10)
+    )
+    make_walkthrough(initiative, "walkthrough-a", narrative)
+    assert only(build_tree(initiative, [], NOW)).word == "1/9 blocks"
+
+
+def test_walkthrough_without_checkboxes(initiative):
+    make_walkthrough(initiative, "walkthrough-a", "# W\n\nNo boxes.\n")
+    item = only(build_tree(initiative, [], NOW))
+    assert item.word == ""
+    assert item.state == OPEN
+
+
+def test_walkthrough_html_only(initiative):
+    make_walkthrough(initiative, "walkthrough-a", None)
+    item = only(build_tree(initiative, [], NOW))
+    assert item.path == "initiative-x/walkthrough-a/walkthrough-a.html"
+    assert item.report is None
+    assert item.word == ""
+    assert item.state == OPEN
+
+
+def test_walkthrough_without_files_is_plain_text(initiative):
+    (initiative / "walkthrough-a").mkdir()
+    item = only(build_tree(initiative, [], NOW))
+    assert item.path is None
+    assert item.report is None
+
+
+def test_walkthrough_unreadable_narrative_has_no_status(initiative):
+    folder = make_walkthrough(initiative, "walkthrough-a", None)
+    (folder / "walkthrough-a.md").write_bytes(b"- [x] \xff\xfe bad\n")
+    item = only(build_tree(initiative, [], NOW))
+    assert item.word == ""
+    assert item.state == OPEN
+
+
+def test_walkthrough_stale_when_open_and_old(initiative):
+    folder = make_walkthrough(initiative, "walkthrough-a", blocks(2, 9))
+    set_mtime(folder, NOW - timedelta(days=14))
+    item = only(build_tree(initiative, [], NOW))
+    assert item.state == STALE
+    assert item.updated == NOW - timedelta(days=14)
+
+
+def test_walkthrough_at_epic_level_after_forges_and_specs(initiative):
+    epic = make_folder(initiative, "epic-x")
+    make_walkthrough(epic, "walkthrough-b", blocks(0, 2))
+    make_folder(epic, "spec-a", f"updated: {ago(1)}\n")
+    make_folder(epic, "forge-a", f"updated: {ago(1)}\n")
+    children = only(build_tree(initiative, [], NOW)).children
+    assert [c.name for c in children] == ["forge-a", "spec-a", "walkthrough-b"]
+    assert children[2].path == "initiative-x/epic-x/walkthrough-b/walkthrough-b.html"
+
+
 def test_read_memlog_ignores_bullets(tmp_path):
     (tmp_path / ".memlog.md").write_text("---\ntopic: x\n---\nstatus: complete\n")
     assert read_memlog(tmp_path) == (None, None)
@@ -297,8 +407,9 @@ def test_kinds_sorted_and_links(initiative):
     make_folder(initiative, "forge-a", f"updated: {ago(1)}\n")
     make_folder(initiative, "epic-a")
     (initiative / "spec-nofile").mkdir()
+    (initiative / "walkthrough-a").mkdir()
     names = [i.name for i in build_tree(initiative, [], NOW)]
-    assert names == ["forge-a", "forge-b", "spec-b", "spec-nofile", "epic-a"]
+    assert names == ["forge-a", "forge-b", "spec-b", "spec-nofile", "walkthrough-a", "epic-a"]
     paths = {i.name: i.path for i in build_tree(initiative, [], NOW)}
     assert paths["forge-a"] == "initiative-x/forge-a/forge-a.md"
     assert paths["spec-nofile"] is None

@@ -48,14 +48,21 @@ def file_link(path: str, text: str, css_class: str) -> str:
     return f'<a class="{css_class}" href="{href}">{escape(text)}</a>'
 
 
-def name_cell(name: str, path: str | None, depth: int, report: str | None = None) -> str:
-    """The name, linked to its file when there is one. Forges may add a `report` link."""
+def name_cell(
+    name: str,
+    path: str | None,
+    depth: int,
+    report: str | None = None,
+    report_label: str = "report",
+) -> str:
+    """The name, linked to its file when there is one. Forges may add a `report`
+    link, walkthroughs an `md` link."""
     if path is None:
         inner = f'<span class="name-text">{escape(name)}</span>'
     else:
         inner = file_link(path, name, "name-link")
     if report is not None:
-        inner += file_link(report, "report", "report-link")
+        inner += file_link(report, report_label, "report-link")
     return f'<span role="cell" class="t-name d{depth}">{inner}</span>'
 
 
@@ -96,19 +103,23 @@ def ticket_row(ticket: Ticket, depth: int, now: datetime) -> str:
 def item_rows(item: TreeItem, depth: int, now: datetime) -> list[str]:
     """The item's row, then its children's, then its tickets'.
 
-    An epic with exactly one spec nests its tickets under that spec.
+    An epic with exactly one spec nests its tickets under that spec, right
+    after the spec's row (before any walkthroughs).
     """
     rows = [tree_row(
         item.kind,
-        name_cell(item.name, item.path, depth, item.report),
+        name_cell(item.name, item.path, depth, item.report, item.report_label),
         word_cell(item.word),
         updated_cell(item.updated, item.state == STALE, now),
     )]
+    specs = [child for child in item.children if child.kind == "spec"]
+    nest_under = specs[0] if len(specs) == 1 else None
     for child in item.children:
         rows += item_rows(child, depth + 1, now)
-    specs = [child for child in item.children if child.kind == "spec"]
-    ticket_depth = depth + 2 if len(specs) == 1 else depth + 1
-    rows += [ticket_row(t, ticket_depth, now) for t in item.tickets]
+        if child is nest_under:
+            rows += [ticket_row(t, depth + 2, now) for t in item.tickets]
+    if nest_under is None:
+        rows += [ticket_row(t, depth + 1, now) for t in item.tickets]
     return rows
 
 

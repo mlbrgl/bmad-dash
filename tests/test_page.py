@@ -115,6 +115,16 @@ def test_tree_row_order_kinds_and_indent():
     assert depths == ["d0", "d0", "d1", "d2", "d2"]
 
 
+def test_tickets_stay_under_the_spec_when_a_walkthrough_follows():
+    initiative = tree_initiative()
+    initiative.tree[1].children.append(walkthrough())
+    rows = rows_of(render([initiative]))[1:]
+    kinds = [re.search(r'class="t-kind">(.*?)</span>', r).group(1) for r in rows]
+    depths = [re.search(r'class="t-name (d\d)"', r).group(1) for r in rows]
+    assert kinds == ["forge", "epic", "spec", "1.1", "1.2", "walk"]
+    assert depths == ["d0", "d0", "d1", "d2", "d2", "d1"]
+
+
 def test_tickets_sit_under_epic_without_a_single_spec():
     initiative = tree_initiative()
     initiative.tree[1].children = []
@@ -175,6 +185,32 @@ def test_forge_report_link():
     assert ('<a class="name-link" href="/file/initiative-a/forge-a/forge-a.md">forge-a</a>'
             '<a class="report-link" href="/file/initiative-a/forge-a/forge-report.html">'
             "report</a>") in forge
+
+
+def walkthrough(state="open") -> TreeItem:
+    return TreeItem("walk", "walkthrough-a",
+                    "initiative-a/walkthrough-a/walkthrough-a.html",
+                    NOW - timedelta(days=1), state, word="2/9 blocks",
+                    report="initiative-a/walkthrough-a/walkthrough-a.md",
+                    report_label="md")
+
+
+def test_walkthrough_md_link_and_blocks_word():
+    initiative = tree_initiative()
+    initiative.tree.insert(1, walkthrough())
+    row = rows_of(render([initiative]))[2]
+    assert ('<a class="name-link" href="/file/initiative-a/walkthrough-a/walkthrough-a.html">'
+            'walkthrough-a</a><a class="report-link" '
+            'href="/file/initiative-a/walkthrough-a/walkthrough-a.md">md</a>') in row
+    assert '<span role="cell" class="st-pending">2/9 blocks</span>' in row
+    assert '<span role="cell" class="t-kind">walk</span>' in row
+
+
+def test_stale_walkthrough_shows_stale_tag():
+    initiative = tree_initiative()
+    initiative.tree.insert(1, walkthrough("stale"))
+    row = rows_of(render([initiative]))[2]
+    assert '1 day ago</span><span class="stale-tag">stale</span>' in row
 
 
 def test_tree_without_tickets_shows_note_first():
@@ -344,6 +380,14 @@ def test_status_doc_cues_without_tickets():
     html = render([initiative])
     # The forge is stale (still open); no `x/y done` without tickets.
     assert status_text(html) == "forge open·spec to slice"
+
+
+def test_open_walkthrough_leaves_status_unchanged():
+    tickets = [{"state": "done"}] * 2
+    plain = render([finished_tree(signals_initiative(tickets))])
+    initiative = finished_tree(signals_initiative(tickets))
+    initiative.tree.insert(1, walkthrough("stale"))
+    assert cell(render([initiative]), "c-status") == cell(plain, "c-status")
 
 
 def test_status_overflow_collapses_to_plus_n():
