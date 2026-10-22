@@ -22,6 +22,7 @@ from bmad_dash.rules import (
     LINK,
     MUTED,
     WARM,
+    StatusItem,
     action_prompt,
     by_activity,
     epic_actions,
@@ -299,7 +300,23 @@ SEP = '<span class="sep">·</span>'
 TICKETS_FAILED = "Couldn't read tickets: tickets.py failed"
 
 
-def status_cell(initiative: Initiative, now: datetime) -> str:
+def status_item(item: StatusItem, worktree: Worktree | None, panel_id: str | None) -> str:
+    """A count as a span; a doc action as a link with a worktree, else its old
+    word as a grey status; `+n` as a button that opens the row's tree."""
+    if item.action is not None:
+        if worktree is None:
+            return f'<span class="{MUTED}">{escape(item.fallback)}</span>'
+        text, prompt, label = item.action
+        return action_link(worktree, prompt, text, item.css_class, label)
+    if item.text.startswith("+") and panel_id is not None:
+        return (
+            f'<button type="button" class="more {item.css_class}"'
+            f' data-open-panel="{panel_id}">{escape(item.text)}</button>'
+        )
+    return f'<span class="{item.css_class}">{escape(item.text)}</span>'
+
+
+def status_cell(initiative: Initiative, now: datetime, panel_id: str | None = None) -> str:
     """The Status sentence: up to 2 waiting items then `+n`, `x/y done`, stale tag.
 
     A finished initiative shows its status word (`done` / `dropped`) instead of
@@ -312,9 +329,8 @@ def status_cell(initiative: Initiative, now: datetime) -> str:
     elif initiative.tickets is None:
         parts = [f'<span class="err">{TICKETS_FAILED}</span>']
     else:
-        parts = [
-            f'<span class="{css_class}">{escape(text)}</span>' for text, css_class in waiting
-        ]
+        worktree = initiative.worktrees[0] if initiative.worktrees else None
+        parts = [status_item(item, worktree, panel_id) for item in waiting]
     if done_count is not None:  # no `x/y done` without counted tickets
         parts.append(f'<span class="done-n">{done_count[0]}/{done_count[1]} done</span>')
     tag = '<span class="stale-tag">stale</span>' if is_stale(initiative, now) else ""
@@ -397,7 +413,7 @@ def initiative_row(
         initiative_cell(initiative, panel_id, is_open),
         worktree_cell(initiative, vscode_failed),
         activity_cell(initiative, now),
-        status_cell(initiative, now),
+        status_cell(initiative, now, panel_id if has_panel(initiative) else None),
         actions_cell(initiative, prs.get(initiative.slug) if prs else None),
     ]
     if has_panel(initiative):

@@ -727,7 +727,7 @@ def test_null_and_missing_state_read_as_no_state_in_tree_and_status(tmp_path):
 
     html = render_page(list_initiatives(root, now=NOW), root)
     assert html.count('<span role="cell" class="st-muted">no state</span>') == 2
-    assert '<span class="st-link">2 no state</span>' in html
+    assert '<span class="st-muted">2 no state</span>' in html
     assert "0/2 done" in html
 
 
@@ -947,8 +947,8 @@ def test_page_shows_words_colours_and_waiting_count(tmp_path):
     assert status_cell_of(html) == (
         '<span class="st-warm">1 blocked</span><span class="sep">·</span>'
         '<span class="st-built">1 built</span><span class="sep">·</span>'
-        '<span class="st-link">+2</span><span class="sep">·</span>'
-        '<span class="done-n">0/4 done</span>'
+        '<button type="button" class="more st-link" data-open-panel="panel-0">+2</button>'
+        '<span class="sep">·</span><span class="done-n">0/4 done</span>'
     )
 
 

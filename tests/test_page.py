@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.page import relative_time, render_page
@@ -423,7 +423,7 @@ def test_status_doc_cues_without_tickets():
     initiative.tree[1].children[0].state = "stale"  # open spec inside the epic
     html = render([initiative])
     # The forge is stale (still open); no `x/y done` without tickets.
-    assert status_text(html) == "forge open·spec to slice"
+    assert status_text(html) == "forge open·spec to slice"  # no worktree
 
 
 def test_open_walkthrough_leaves_status_unchanged():
@@ -440,7 +440,7 @@ def test_status_overflow_collapses_to_plus_n():
     html = render([signals_initiative(tickets)])
     # built, planned, backlog, forge open: 2 shown, 2 hidden.
     assert status_text(html) == "1 built·1 planned·+2·0/3 done"
-    assert '<span class="st-link">+2</span>' in html
+    assert '<span class="st-link">+2</span>' not in html  # a button, see below
 
 
 def test_status_all_dropped_asks_to_confirm_close_without_done_count():
@@ -452,7 +452,7 @@ def test_nothing_open_without_status_asks_to_confirm_close():
     tickets = [{"state": "done"}] * 4
     html = render([finished_tree(signals_initiative(tickets))])
     assert cell(html, "c-status") == (
-        '<span class="st-link">confirm close or add work</span><span class="sep">·</span>'
+        '<span class="st-muted">confirm close or add work</span><span class="sep">·</span>'
         '<span class="done-n">4/4 done</span>'
     )
     assert "show-finished" not in markup(html)
@@ -475,7 +475,7 @@ def test_unknown_states_follow_backlog_in_first_appearance_order():
 def test_null_and_missing_state_count_as_no_state():
     tickets = [{"state": None}, {}, {"state": "backlog"}]
     initiative = finished_tree(signals_initiative(tickets))
-    assert waiting_items(initiative) == [("1 backlog", "st-muted"), ("2 no state", "st-link")]
+    assert waiting_items(initiative) == [("1 backlog", "st-muted"), ("2 no state", "st-muted")]
 
 
 def test_no_confirm_cue_when_tickets_unavailable():
@@ -970,3 +970,98 @@ def test_no_epic_or_retro_link_without_worktree():
             assert "<a " not in html
     assert item_cells(epic_item("to retro", retro_word="open items"), worktrees=False)[1] == (
         '<span role="cell" class="st-muted">open items</span>')
+
+
+# --- status sentence actions ---
+
+STATUS_WT = Worktree(Path("/wt dir"), "main")
+
+
+def status_of(initiative: Initiative, worktree: Worktree | None = STATUS_WT) -> str:
+    initiative.worktrees = [worktree] if worktree else []
+    return cell(render([initiative]), "c-status")
+
+
+def claude_links(status: str) -> list[str]:
+    return re.findall(r'<a class="st-link" href="([^"]+)" aria-label="([^"]+)">([^<]+)</a>',
+                      status)
+
+
+def spec_initiative(tickets=()) -> Initiative:
+    spec = TreeItem("spec", "spec-x", "initiative-a/spec-x/spec-x.md", NOW, "open")
+    return Initiative("initiative-a", "A", [], tickets=list(tickets), tree=[spec])
+
+
+def test_counts_are_statuses_never_blue_or_links():
+    for tickets, expected in [
+        ([{"state": "x", "status": "blocked"}], '<span class="st-warm">1 blocked</span>'),
+        ([{"state": "review", "status": "built"}], '<span class="st-built">1 built</span>'),
+        ([{}], '<span class="st-muted">1 no state</span>'),
+        ([{"state": "in-progress"}], '<span class="st-muted">1 in progress</span>'),
+        ([{"state": "planned"}], '<span class="st-muted">1 planned</span>'),
+    ]:
+        for worktree in (STATUS_WT, None):
+            status = status_of(finished_tree(signals_initiative(tickets)), worktree)
+            assert expected in status
+            assert "<a " not in status and "st-link" not in status
+
+
+def test_slice_spec_link_with_worktree():
+    links = claude_links(status_of(spec_initiative()))
+    assert len(links) == 1
+    href, label, text = links[0]
+    assert text == "slice spec"
+    assert label == "slice spec: slice the open spec in a new session"
+    prompt = "/bmad-ticket Slice _bmad-output/initiative-a/spec-x/spec-x.md"
+    assert href == f"claude://code/new?folder={quote('/wt dir', safe='')}&amp;q={quote(prompt, safe='')}"
+
+
+def test_resume_forge_lists_every_open_forge_path():
+    forges = [TreeItem("forge", f"forge-{n}", f"initiative-a/forge-{n}/forge-{n}.md", NOW, "open")
+              for n in "ab"]
+    forges.append(TreeItem("forge", "forge-c", "initiative-a/forge-c/forge-c.md", NOW, "finished"))
+    initiative = Initiative("initiative-a", "A", [], tickets=[], tree=forges)
+    (href, label, text), = claude_links(status_of(initiative))
+    assert text == "resume forge"
+    prompt = ("/bmad-forge-idea Resume _bmad-output/initiative-a/forge-a/forge-a.md, "
+              "_bmad-output/initiative-a/forge-b/forge-b.md")
+    assert unquote(href).endswith("q=" + prompt)
+
+
+def test_close_link_only_when_nothing_open():
+    initiative = Initiative("initiative-a", "A", [], tickets=[{"state": "done"}])
+    (href, label, text), = claude_links(status_of(initiative))
+    assert text == "close"
+    assert unquote(href).endswith("q=/bmad-ticket Close initiative-a, or plan more work")
+    assert label == "close: close initiative-a or plan more work in a new session"
+    # A count or an open spec means no `close`.
+    assert "close" not in status_of(Initiative("initiative-a", "A", [], tickets=[{"state": "backlog"}]))
+    assert "close" not in status_of(spec_initiative([{"state": "done"}]))
+
+
+def test_no_worktree_shows_old_words_as_grey_statuses():
+    status = status_of(spec_initiative(), None)
+    assert "claude://" not in status and "<a " not in status
+    assert '<span class="st-muted">spec to slice</span>' in status
+    done = Initiative("initiative-a", "A", [], tickets=[{"state": "done"}])
+    assert '<span class="st-muted">confirm close or add work</span>' in status_of(done, None)
+
+
+def test_tickets_failed_has_no_waiting_items():
+    status = status_of(finished_tree(signals_initiative(None)))
+    assert "Couldn&#x27;t read tickets" in status or "Couldn't read tickets" in status
+    assert "<a " not in status
+
+
+def test_plus_n_is_a_button_that_targets_the_panel_without_a_worktree():
+    tickets = [{"state": "backlog"}, {"state": "planned"}, {"state": "stuck"}]
+    status = status_of(signals_initiative(tickets), None)
+    assert ('<button type="button" class="more st-link" data-open-panel="panel-0">+2</button>'
+            in status)
+    assert 'id="panel-0"' in render([signals_initiative(tickets)])
+
+
+def test_plus_n_is_plain_text_without_a_panel():
+    initiative = Initiative("initiative-a", "A", [],
+                            tickets=[{"state": "backlog"}, {"state": "planned"}, {"state": "stuck"}])
+    assert '<span class="st-link">+1</span>' in status_of(initiative)
