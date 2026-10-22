@@ -3,3 +3,4 @@
 /.claude/worktrees/
 .venv/
 __pycache__/
+/.claude/launch.json
