@@ -4,14 +4,18 @@ A worktree works on an initiative when its own
 `_bmad/custom/config.user.toml` has `[core] active_initiative = "<slug>"`.
 """
 
+from __future__ import annotations
+
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bmad_dash import commands
+from bmad_dash.rules import stack_tips
 from bmad_dash.signals import Activity, last_activity, worktree_commits
 from bmad_dash.tree import (
     Ticket,
@@ -21,6 +25,9 @@ from bmad_dash.tree import (
     initiative_tickets,
     load_tickets,
 )
+
+if TYPE_CHECKING:  # types only: stack.py imports this module
+    from bmad_dash.stack import GraphiteStack
 
 
 @dataclass
@@ -109,11 +116,18 @@ def read_title(initiative_dir: Path, fields: dict[str, str] | None = None) -> st
 
 
 def make_initiative(
-    root: Path, initiative_dir: Path, worktrees: list[Worktree], now: datetime
+    root: Path,
+    initiative_dir: Path,
+    worktrees: list[Worktree],
+    now: datetime,
+    stack: GraphiteStack | None = None,
 ) -> Initiative:
+    """`stack` is from `gt_stack`; with it, the last commit is the newest on
+    the stack's branches, not just the worktree's HEAD."""
     tickets = load_tickets(root, initiative_dir)
+    branches = stack_tips(stack, worktrees[0].branch) if worktrees else None
     # One git call, shared by the tree (walkthrough staleness) and Last activity.
-    commits = worktree_commits(worktrees)
+    commits = worktree_commits(worktrees, branches)
     last_commit = max((c.when for c in commits), default=None)
     fields = initiative_fields(initiative_dir)  # read once, for title and status
     return Initiative(
@@ -153,9 +167,12 @@ def initiative_worktree(
     return worktrees_by_slug(root, worktrees).get(slug)
 
 
-def list_initiatives(root: Path, now: datetime | None = None) -> list[Initiative]:
+def list_initiatives(
+    root: Path, now: datetime | None = None, stack: GraphiteStack | None = None
+) -> list[Initiative]:
     """One Initiative per `_bmad-output/initiative-*` folder, sorted by slug,
-    each with the first worktree whose config names it, its tickets and its tree."""
+    each with the first worktree whose config names it, its tickets and its tree.
+    Pass `stack` from `gt_stack` so commits come from the Graphite stack."""
     if now is None:
         now = datetime.now()
     claimed = worktrees_by_slug(root)
@@ -170,7 +187,7 @@ def list_initiatives(root: Path, now: datetime | None = None) -> list[Initiative
     with ThreadPoolExecutor(max_workers=8) as pool:
         return list(pool.map(
             lambda d: make_initiative(
-                root, d, [claimed[d.name]] if d.name in claimed else [], now
+                root, d, [claimed[d.name]] if d.name in claimed else [], now, stack
             ),
             initiative_dirs,
         ))

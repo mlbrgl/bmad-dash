@@ -5,9 +5,10 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from conftest import STACK_TIMES
 
 from bmad_dash.initiatives import Worktree, list_initiatives
-from bmad_dash.signals import last_activity
+from bmad_dash.signals import last_activity, last_commit
 from bmad_dash.tree import ticket_counts
 
 T_OLD = datetime(2026, 10, 1, 9, 0)
@@ -182,7 +183,6 @@ def test_tie_is_judged_to_the_minute(initiative):
 ])
 def test_git_log_failure_gives_no_commit(tmp_path, monkeypatch, failure):
     from bmad_dash import commands
-    from bmad_dash.signals import last_commit
 
     repo = make_repo(tmp_path / "repo", T_OLD, "old commit")
 
@@ -193,3 +193,40 @@ def test_git_log_failure_gives_no_commit(tmp_path, monkeypatch, failure):
 
     monkeypatch.setattr(commands.subprocess, "run", run)
     assert last_commit(repo) is None
+
+
+# --- last commit from the stack's tips ---
+
+
+@pytest.fixture
+def wt_a(stacked_project):
+    return stacked_project.parent / "worktrees" / "wt-a"
+
+
+@pytest.mark.parametrize("branches, subject", [
+    (None, "feature-a work"),  # HEAD, as before
+    (["feature-a", "b", "c"], "c work"),  # bottom of the stack
+    (["b", "c"], "c work"),  # middle of the stack
+    (["feature-a"], "feature-a work"),  # fork right above: just its own branch
+    (["feature-a", "b", "gone"], "b work"),  # missing local branch is skipped
+])
+def test_last_commit_is_newest_on_the_tips(wt_a, branches, subject):
+    commit = last_commit(wt_a, branches)
+    assert commit.text == subject
+    assert commit.when == STACK_TIMES[subject.removesuffix(" work")]
+
+
+def test_last_commit_on_tips_runs_one_git_log(wt_a, monkeypatch):
+    from bmad_dash import commands
+
+    calls = []
+    real_run = commands.run
+
+    def spy(args, *rest):
+        calls.append(args)
+        return real_run(args, *rest)
+
+    monkeypatch.setattr(commands, "run", spy)
+    last_commit(wt_a, ["feature-a", "b", "c"])
+    assert calls == [["git", "log", "-1", "--format=%ct%x00%s", "--ignore-missing",
+                      "refs/heads/feature-a", "refs/heads/b", "refs/heads/c"]]

@@ -15,14 +15,23 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
 - The PR button shows the last PR of the stack starting at the row's branch
   (Stack's last PR). With Graphite, the stack follows `gt state`'s tracked
   children (`stack_branches`); without it, the user's PRs (`row_pr`).
+- The initiative's last commit is the newest one on the local tips of the
+  branches walked from the row's branch (`stack_tips`, up to a fork).
+  Without a stack, detached, or on trunk, it is the worktree's own HEAD.
 """
+
+from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from bmad_dash.initiatives import Initiative
 from bmad_dash.prs import PullRequest, last_pr
 from bmad_dash.tree import FINISHED, TreeItem, is_old, status_word, ticket_counts
+
+if TYPE_CHECKING:  # types only: initiatives.py imports this module
+    from bmad_dash.initiatives import Initiative
+    from bmad_dash.stack import GraphiteStack
 
 # Not-done ticket states, in the order the Status sentence lists them.
 WAITING_STATES = ["review", "in-progress", "planned", "backlog"]
@@ -118,17 +127,33 @@ def row_pr(initiative: Initiative, prs: Sequence[PullRequest] | None) -> PullReq
     return last_pr(list(prs), branch)
 
 
-def stack_branches(children: Mapping[str, Sequence[str]], branch: str) -> list[str] | None:
-    """The stack from `branch` up: `[branch, ..., top]`, following the one
-    child of each branch. `children` maps a branch to its tracked children.
-    None on a fork (two or more children) or a cycle."""
-    stack = [branch]
+def walked_branches(children: Mapping[str, Sequence[str]], branch: str) -> list[str]:
+    """The branches walked from `branch` up: `[branch, ...]`, following the one
+    child of each branch. Stops at the top, before a fork, or before a cycle.
+    `children` maps a branch to its tracked children."""
+    walked = [branch]
     while True:
-        next_branches = children.get(stack[-1], [])
-        if not next_branches:
-            return stack
-        if len(next_branches) > 1:
-            return None  # fork
-        if next_branches[0] in stack:
-            return None  # cycle: no sensible top
-        stack.append(next_branches[0])
+        next_branches = children.get(walked[-1], [])
+        if len(next_branches) != 1:  # top (none) or fork (two or more)
+            return walked
+        if next_branches[0] in walked:  # cycle
+            return walked
+        walked.append(next_branches[0])
+
+
+def stack_branches(children: Mapping[str, Sequence[str]], branch: str) -> list[str] | None:
+    """The stack from `branch` up: `[branch, ..., top]`.
+    None on a fork (two or more children) or a cycle: the walk stopped early."""
+    walked = walked_branches(children, branch)
+    if children.get(walked[-1]):  # stopped with children left: fork or cycle
+        return None
+    return walked
+
+
+def stack_tips(stack: GraphiteStack | None, branch: str) -> list[str] | None:
+    """The branches whose newest commit is the initiative's last commit
+    (Last activity, walkthrough staleness): the ones walked from `branch`.
+    None means use the worktree's own HEAD: no stack, detached, or on trunk."""
+    if stack is None or branch == "detached" or branch in stack.trunks:
+        return None
+    return walked_branches(stack.children, branch)

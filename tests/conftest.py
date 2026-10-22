@@ -1,5 +1,7 @@
+import os
 import subprocess
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,17 @@ from bmad_dash.server import make_server
 
 def git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def commit(cwd: Path, subject: str, when: datetime) -> None:
+    """An empty commit dated `when` (author and committer)."""
+    stamp = f"@{int(when.timestamp())}"
+    env = {**os.environ, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp}
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit",
+         "--allow-empty", "-m", subject],
+        cwd=cwd, check=True, capture_output=True, env=env,
+    )
 
 
 def write_config(worktree: Path, text: str) -> None:
@@ -62,6 +75,38 @@ def project(tmp_path: Path) -> Path:
     write_initiative(root, "initiative-nofile", None)
     (root / "_bmad-output" / "planning-artifacts").mkdir()
     return root
+
+
+# Commit times of `stacked_project`'s branches: a oldest, c newest.
+STACK_TIMES = {
+    "feature-a": datetime.now().replace(microsecond=0) - timedelta(days=3),
+    "b": datetime.now().replace(microsecond=0) - timedelta(days=2),
+    "c": datetime.now().replace(microsecond=0) - timedelta(days=1),
+}
+
+
+def add_walkthrough(project: Path, updated: datetime) -> None:
+    """A walkthrough in initiative-matched, last touched at `updated`."""
+    folder = project / "_bmad-output" / "initiative-matched" / "walkthrough-x"
+    folder.mkdir()
+    page = folder / "walkthrough-x.md"
+    page.write_text("# W\n")
+    os.utime(page, (updated.timestamp(), updated.timestamp()))
+
+
+@pytest.fixture
+def stacked_project(project: Path) -> Path:
+    """`project` with a real stack feature-a -> b -> c, c's commit newest.
+    wt-a (initiative-matched) stays on feature-a, the bottom of the stack.
+    Each branch's commit subject is "<branch> work"."""
+    wt_a = project.parent / "worktrees" / "wt-a"
+    commit(wt_a, "feature-a work", STACK_TIMES["feature-a"])
+    git(wt_a, "checkout", "-b", "b")
+    commit(wt_a, "b work", STACK_TIMES["b"])
+    git(wt_a, "checkout", "-b", "c")
+    commit(wt_a, "c work", STACK_TIMES["c"])
+    git(wt_a, "checkout", "feature-a")
+    return project
 
 
 SPEC_MD = """---

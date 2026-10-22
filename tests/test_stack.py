@@ -6,7 +6,7 @@ import pytest
 
 from bmad_dash import commands as commands_module
 from bmad_dash.initiatives import Initiative, Worktree
-from bmad_dash.rules import stack_branches
+from bmad_dash.rules import stack_branches, stack_tips, walked_branches
 from bmad_dash.stack import GraphiteStack, gt_stack, gt_tracked, load_topology, stack_prs
 
 REMOTE = "origin\tgit@github.com:o/r.git (fetch)\n"
@@ -100,7 +100,7 @@ ROOT = Path("/root")
 
 def shown(rows):
     """slug -> PR number, or None when GitHub failed."""
-    result = stack_prs(ROOT, rows, load_topology(ROOT))
+    result = stack_prs(ROOT, rows, load_topology(ROOT, gt_stack(ROOT)))
     return None if result is None else {slug: pr.number for slug, pr in result.items()}
 
 
@@ -278,7 +278,7 @@ def test_fallback_walks_my_prs(fake, setup):
     f = fake(mine=STACK_PRS, **setup)
     rows = [row("a", "lone-or-stack"), row("m", "merged"), row("d", "draft"),
             row("f", "fork"), row("none", "no-pr"), row("detached", "detached")]
-    result = stack_prs(ROOT, rows, load_topology(ROOT))
+    result = stack_prs(ROOT, rows, load_topology(ROOT, gt_stack(ROOT)))
     assert {slug: (pr.number, pr.state) for slug, pr in result.items()} == {
         "lone-or-stack": (9, "open"), "merged": (4, "merged"), "draft": (5, "draft"),
     }
@@ -293,7 +293,44 @@ def test_fallback_gh_failure_gives_none(fake, setup):
     assert shown([row("a")]) is None
 
 
-def test_no_github_remote_runs_neither_gh_nor_gt(fake):
+def test_no_github_remote_runs_no_gh(fake):
     f = fake(remote="origin\tgit@gitlab.com:o/r.git (fetch)\n")
     assert shown([row("a")]) == {}
-    assert f.ran("gh") == [] and f.ran("gt") == []
+    assert f.ran("gh") == []
+
+
+def test_no_github_remote_still_gives_the_gt_stack(fake):
+    # The stack is local topology: the commits use it even without GitHub.
+    fake(remote="origin\tgit@gitlab.com:o/r.git (fetch)\n")
+    stack = gt_stack(ROOT)
+    assert stack == GraphiteStack({"main": ["a"], "a": ["b"], "b": ["c"]}, {"main"})
+    assert load_topology(ROOT, stack) == []
+
+
+# --- walked_branches / stack_tips (the initiative's last commit) ---
+
+CHAIN = GraphiteStack({"main": ["a"], "a": ["b"], "b": ["c"]}, {"main"})
+
+
+def test_walk_goes_to_the_top():
+    assert walked_branches(CHAIN.children, "a") == ["a", "b", "c"]
+    assert walked_branches(CHAIN.children, "b") == ["b", "c"]
+
+
+def test_walk_stops_at_a_fork_and_a_cycle():
+    assert walked_branches({"a": ["b", "x"]}, "a") == ["a"]
+    assert walked_branches({"a": ["b"], "b": ["c", "d"]}, "a") == ["a", "b"]
+    assert walked_branches({"a": ["b"], "b": ["a"]}, "a") == ["a", "b"]
+
+
+@pytest.mark.parametrize("stack, branch, tips", [
+    (CHAIN, "a", ["a", "b", "c"]),
+    (CHAIN, "b", ["b", "c"]),
+    (GraphiteStack({"main": ["a"], "a": ["b", "x"]}, {"main"}), "a", ["a"]),  # fork
+    (CHAIN, "main", None),  # trunk: its own HEAD
+    (CHAIN, "detached", None),
+    (None, "a", None),  # no gt, untracked, or gt failed
+    (CHAIN, "untracked-branch", ["untracked-branch"]),
+])
+def test_stack_tips(stack, branch, tips):
+    assert stack_tips(stack, branch) == tips

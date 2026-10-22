@@ -3,10 +3,11 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from conftest import write_initiative
+from conftest import STACK_TIMES, add_walkthrough, write_initiative
 
-from bmad_dash.initiatives import Worktree, active_initiative, list_initiatives
+from bmad_dash.initiatives import Worktree, active_initiative, list_initiatives, make_initiative
 from bmad_dash.page import render_page
+from bmad_dash.stack import GraphiteStack
 from bmad_dash.tree import OPEN, STALE
 
 
@@ -106,3 +107,61 @@ def test_initiative_level_ticket_shows_in_tree_and_counts(project):
     assert "Top one" in html
     assert 'class="toggle"' in html  # only a top ticket, still a caret
     assert "0/1 done" in html
+
+
+# --- last commit from the Graphite stack ---
+
+# feature-a -> b -> c, as built by `stacked_project`.
+CHAIN = GraphiteStack({"main": ["feature-a"], "feature-a": ["b"], "b": ["c"]}, {"main"})
+
+
+def walkthrough_state(initiative) -> str:
+    return next(item.state for item in initiative.tree if item.name == "walkthrough-x")
+
+
+def test_stack_bottom_uses_the_newest_tip(stacked_project):
+    # Touched after feature-a's commit, before c's.
+    add_walkthrough(stacked_project, STACK_TIMES["feature-a"] + timedelta(hours=1))
+    matched = {i.slug: i for i in list_initiatives(stacked_project, stack=CHAIN)}["initiative-matched"]
+    assert (matched.activity.text, matched.activity.when) == ("c work", STACK_TIMES["c"])
+    assert walkthrough_state(matched) == STALE
+
+
+def test_without_stack_uses_the_worktree_head(stacked_project):
+    add_walkthrough(stacked_project, STACK_TIMES["feature-a"] + timedelta(hours=1))
+    matched = by_slug(stacked_project)["initiative-matched"]
+    assert matched.activity.text == "feature-a work"
+    assert walkthrough_state(matched) == OPEN
+
+
+def make_matched(project: Path, worktree: Worktree, stack: GraphiteStack):
+    folder = project / "_bmad-output" / "initiative-matched"
+    return make_initiative(project, folder, [worktree], datetime.now(), stack)
+
+
+def test_middle_of_stack_uses_newest_above(stacked_project):
+    wt = stacked_project.parent / "worktrees" / "wt-a"
+    assert make_matched(stacked_project, Worktree(wt, "b"), CHAIN).activity.text == "c work"
+
+
+def test_fork_uses_branches_up_to_the_fork(stacked_project):
+    fork = GraphiteStack({"main": ["feature-a"], "feature-a": ["b", "x"], "b": ["c"]}, {"main"})
+    wt = stacked_project.parent / "worktrees" / "wt-a"
+    assert make_matched(stacked_project, Worktree(wt, "feature-a"), fork).activity.text == "feature-a work"
+
+
+def test_missing_local_branch_is_skipped(stacked_project):
+    stack = GraphiteStack({"main": ["feature-a"], "feature-a": ["b"], "b": ["gone"]}, {"main"})
+    wt = stacked_project.parent / "worktrees" / "wt-a"
+    assert make_matched(stacked_project, Worktree(wt, "feature-a"), stack).activity.text == "b work"
+
+
+def test_trunk_keeps_its_own_commit(stacked_project):
+    # The main checkout is on main; c is newer but not main's.
+    shared = {i.slug: i for i in list_initiatives(stacked_project, stack=CHAIN)}["initiative-shared"]
+    assert shared.activity.text == "init"
+
+
+def test_detached_keeps_its_own_commit(stacked_project):
+    wt_b = stacked_project.parent / "worktrees" / "wt-b"
+    assert make_matched(stacked_project, Worktree(wt_b, "detached"), CHAIN).activity.text == "init"

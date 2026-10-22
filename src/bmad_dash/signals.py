@@ -4,7 +4,9 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
 
 - Last activity: latest of any memlog `updated:` under the initiative folder,
   the mtime of any `*-plan.md` under it, and the last commit on each matched
-  worktree. Ties go to the memlog, then the plan, then the commit.
+  worktree. With a Graphite stack that commit is the newest on the local tips
+  of the stack's branches (Row: Last activity); without one, the worktree's
+  HEAD. Ties go to the memlog, then the plan, then the commit.
   The text is display only: never derive state from it.
 """
 
@@ -57,11 +59,14 @@ def plan_activities(initiative_dir: Path) -> list[Activity]:
     return activities
 
 
-def last_commit(worktree_path: Path) -> Activity | None:
-    """The last commit on the worktree's HEAD, or None if git fails."""
-    output = commands.run(
-        ["git", "log", "-1", "--format=%ct%x00%s"], worktree_path, commands.GIT_TIMEOUT
-    )
+def last_commit(worktree_path: Path, branches: list[str] | None = None) -> Activity | None:
+    """The last commit on the worktree's HEAD, or None if git fails.
+    With `branches`, the newest commit reachable from any of their local tips;
+    a branch missing locally is skipped."""
+    args = ["git", "log", "-1", "--format=%ct%x00%s"]
+    if branches is not None:
+        args += ["--ignore-missing", *(f"refs/heads/{b}" for b in branches)]
+    output = commands.run(args, worktree_path, commands.GIT_TIMEOUT)
     if output is None:
         return None
     stamp, _, subject = output.strip("\n").partition("\x00")
@@ -72,11 +77,12 @@ def last_commit(worktree_path: Path) -> Activity | None:
     return Activity(when, subject, "commit")
 
 
-def worktree_commits(worktrees: list) -> list[Activity]:
-    """The last commit of each worktree (anything with `.path`), skipping git failures."""
+def worktree_commits(worktrees: list, branches: list[str] | None = None) -> list[Activity]:
+    """The last commit of each worktree (anything with `.path`), skipping git failures.
+    `branches` is passed to `last_commit`: the stack tips to read instead of HEAD."""
     commits = []
     for worktree in worktrees:
-        commit = last_commit(worktree.path)
+        commit = last_commit(worktree.path, branches)
         if commit is not None:
             commits.append(commit)
     return commits

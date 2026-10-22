@@ -8,6 +8,8 @@ Rules in `dashboard-status-rules.md` (Stack's last PR):
 - `gt` only runs when `<git common dir>/.graphite_repo_config` exists. In an
   untracked repo `gt state` sets Graphite up and writes into `.git`.
 - Without `gt`, or in an untracked repo, the user's PRs are walked instead.
+- `gt_stack` runs once per page load. Its result feeds both the PR buttons
+  and the initiatives' last commit (Row: Last activity).
 """
 
 import json
@@ -72,15 +74,15 @@ def gt_stack(root: Path) -> GraphiteStack | None:
     return stack
 
 
-def load_topology(root: Path) -> Topology:
+def load_topology(root: Path, stack: GraphiteStack | None) -> Topology:
     """What `stack_prs` needs, before the initiatives are known.
-    No GitHub remote: `[]`, and neither gh nor gt runs."""
+    `stack` is from `gt_stack`, run once per page load and shared with the
+    initiatives. No GitHub remote: `[]`, and gh doesn't run."""
     remote = has_github_remote(root)
     if remote is None:
         return None
     if not remote:
         return []
-    stack = gt_stack(root)
     if stack is not None:
         return stack
     return list_my_prs(root)

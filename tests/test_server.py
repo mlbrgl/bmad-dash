@@ -6,8 +6,10 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import timedelta
 
 import pytest
+from conftest import STACK_TIMES, add_walkthrough
 
 import bmad_dash.server as server_module
 from bmad_dash import commands as commands_module
@@ -122,7 +124,7 @@ def test_gh_failure_in_gt_path_shows_header_and_no_buttons(project, monkeypatch,
 
 
 def test_github_failure_keeps_page(project, monkeypatch, serve):
-    monkeypatch.setattr(server_module, "load_topology", lambda root: None)
+    monkeypatch.setattr(server_module, "load_topology", lambda root, stack: None)
     html = get_page(serve(project))
     assert "Couldn't reach GitHub" in html
     assert "Matched one" in html
@@ -343,3 +345,59 @@ def test_body_cut_short_by_client_is_400(project, serve):
     conn.close()
     assert reply.startswith(b"HTTP/1.0 400") or reply.startswith(b"HTTP/1.1 400")
     assert launched == []
+
+
+# --- last commit from the Graphite stack ---
+
+
+def walkthrough_row(html: str) -> str:
+    return next(r for r in html.split('<div class="t-row"') if "walkthrough-x" in r)
+
+
+def fake_gt(monkeypatch, calls, gt):
+    """Real git (no GitHub remote); `gt` is gt's stdout, or an exception to raise."""
+    real_run = subprocess.run
+
+    def run(args, **kwargs):
+        if args[0] == "gt":
+            calls.append(args)
+            if isinstance(gt, BaseException):
+                raise gt
+            return subprocess.CompletedProcess(args, 0, gt, "")
+        if args[0] == "gh":
+            raise AssertionError("gh must not run without a GitHub remote")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(commands_module.subprocess, "run", run)
+
+
+def test_stack_newest_commit_reaches_last_activity_and_walkthrough(
+    stacked_project, monkeypatch, serve
+):
+    track_with_graphite(stacked_project)
+    add_walkthrough(stacked_project, STACK_TIMES["feature-a"] + timedelta(hours=1))
+    calls = []
+    fake_gt(monkeypatch, calls, GT_STATE)  # also: no GitHub remote, stack still used
+    html = get_page(serve(stacked_project))
+    assert "c work" in html and "feature-a work" not in html
+    assert "stale-tag" in walkthrough_row(html)
+    assert calls == [["gt", "state"]]  # once per request
+    assert 'class="btn btn-2 pr"' not in html and "Couldn't reach GitHub" not in html
+
+
+def test_gt_state_runs_once_with_github(stacked_project, monkeypatch, serve):
+    track_with_graphite(stacked_project)
+    calls = []
+    fake_github(monkeypatch, calls, lambda args: (0, "[]"))
+    html = get_page(serve(stacked_project))
+    assert "c work" in html
+    assert [args for args in calls if args[0] == "gt"] == [["gt", "state"]]
+
+
+def test_gt_missing_uses_the_worktree_head(stacked_project, monkeypatch, serve):
+    track_with_graphite(stacked_project)
+    add_walkthrough(stacked_project, STACK_TIMES["feature-a"] + timedelta(hours=1))
+    fake_gt(monkeypatch, [], FileNotFoundError("gt"))
+    html = get_page(serve(stacked_project))
+    assert "feature-a work" in html and "c work" not in html
+    assert "stale-tag" not in walkthrough_row(html)
