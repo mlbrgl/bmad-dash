@@ -161,7 +161,9 @@ def test_tickets_py_called_once_per_initiative(project):
     script.parent.mkdir(parents=True)
     data = {"tickets": [{"state": "done"}, {"state": "dropped"}, {"state": "planned"}]}
     script.write_text(
-        f"open({str(calls)!r}, 'a').write('x')\nprint({json.dumps(json.dumps(data))})\n")
+        "import sys\n"
+        f"if 'status' in sys.argv: open({str(calls)!r}, 'a').write('x')\n"
+        f"print({json.dumps(json.dumps(data))})\n")
 
     initiatives = list_initiatives(project)
     assert calls.read_text() == "x" * len(initiatives)

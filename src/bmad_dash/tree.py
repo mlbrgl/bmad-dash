@@ -11,6 +11,10 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
 - Any open item untouched for `STALE_AFTER` is stale instead. Finished is never stale.
 - Ticket: stale when not done or dropped and untouched for `STALE_AFTER`.
   A missing or null state reads as "" (`ticket_state`) and shows as `no state`.
+  Its word (`ticket_word`), first match: `blocked` (plan status `blocked` or
+  `blocked_at` set), `waits on <refs>` (`tickets.py next` lists it as blocked),
+  `built` or `in review` (plan status), else the state word.
+  Done and dropped tickets always read as their state.
 - Ticket counts: done/total, dropped tickets counted in neither.
 - Initiative-level tickets (those `tickets.py` lists with the initiative folder
   as their `epic`) show after the epics, at the initiative level.
@@ -38,6 +42,15 @@ class Ticket:
     path: str | None  # plan, else leaf file, relative to `_bmad-output/`; None if neither
     updated: datetime | None
     stale: bool
+    # In `tickets.py next` `ready_to_start`; only planned and backlog words use it.
+    ready: bool = False
+
+
+@dataclass
+class NextInfo:
+    """What `tickets.py next` says about an initiative, by ticket ref."""
+    waiting: dict[str, list[str]]  # blocked ticket -> the refs it waits on
+    ready: set[str]  # tickets ready to start
 
 
 @dataclass
@@ -81,6 +94,70 @@ def load_tickets(root: Path, initiative_dir: Path) -> list[dict] | None:
     if not isinstance(tickets, list):
         return None
     return [t for t in tickets if isinstance(t, dict)]
+
+
+def next_rows(data: dict, key: str) -> list[dict] | None:
+    """`data[key]` when it is a list of objects, else None."""
+    rows = data.get(key)
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return None
+    return rows
+
+
+def waiting_refs(row: dict) -> list[str] | None:
+    """The refs a `next` blocked row waits on. A local id (int) means a ticket
+    of the row's own epic: `<epic prefix of its ref>.<id>`. None on a wrong shape."""
+    ref = row.get("ref")
+    waiting_on = row.get("waiting_on", [])  # absent when blocked by `unknown` or status
+    if not isinstance(ref, str) or not isinstance(waiting_on, list):
+        return None
+    prefix = ref.rpartition(".")[0]
+    refs = []
+    for item in waiting_on:
+        if isinstance(item, bool) or not isinstance(item, (int, str)):
+            return None
+        refs.append(f"{prefix}.{item}" if isinstance(item, int) and prefix else str(item))
+    return refs
+
+
+def load_next(root: Path, initiative_dir: Path) -> NextInfo | None:
+    """Which tickets wait on what and which are ready, from `tickets.py next`.
+    None on any failure (no script, non-zero exit, bad JSON, wrong shape)."""
+    script = root / "_bmad" / "method" / "scripts" / "tickets.py"
+    if not script.is_file():
+        return None
+    output = commands.run(
+        ["uv", "run", str(script), "--project-root", str(root),
+         "next", str(initiative_dir)],
+        root,
+        commands.TICKETS_TIMEOUT,
+    )
+    if output is None:
+        return None
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    ready_rows = next_rows(data, "ready_to_start")
+    blocked_rows = next_rows(data, "blocked")
+    if ready_rows is None or blocked_rows is None:
+        return None
+
+    waiting = {}
+    for row in blocked_rows:
+        refs = waiting_refs(row)
+        if refs is None:
+            return None
+        if refs:
+            waiting[row["ref"]] = refs
+    ready = set()
+    for row in ready_rows:
+        if not isinstance(row.get("ref"), str):
+            return None
+        ready.add(row["ref"])
+    return NextInfo(waiting=waiting, ready=ready)
 
 
 def parse_time(text: str) -> datetime | None:
@@ -153,6 +230,38 @@ def is_old(updated: datetime, now: datetime) -> bool:
 def ticket_state(raw: dict) -> str:
     """A `tickets.py` row's state; missing or null reads as ""."""
     return str(raw.get("state") or "")
+
+
+def status_word(state: str) -> str:
+    """`in-progress` -> `in progress`, "" -> `no state`; other states as they are."""
+    return state.replace("-", " ") if state else "no state"
+
+
+def waits_on_word(refs: list[str]) -> str:
+    """`waits on 3.10`, or `waits on 3.10 +1` for several."""
+    extra = f" +{len(refs) - 1}" if len(refs) > 1 else ""
+    return f"waits on {refs[0]}{extra}"
+
+
+def ticket_word(raw: dict, next_info: NextInfo | None = None) -> str:
+    """A `tickets.py status` row's word, shared by the tree and Status.
+    Done and dropped read as they are; else the first match of: `blocked`,
+    `waits on <refs>`, `built`, `in review`, the state word.
+    Without `next_info` nothing waits."""
+    state = ticket_state(raw)
+    if state in ("done", "dropped"):
+        return state
+    if raw.get("status") == "blocked" or raw.get("blocked_at"):
+        return "blocked"
+    if next_info is not None:
+        refs = next_info.waiting.get(str(raw.get("ref") or ""))
+        if refs:
+            return waits_on_word(refs)
+    if raw.get("status") == "built":
+        return "built"
+    if raw.get("status") == "in-review":
+        return "in review"
+    return status_word(state)
 
 
 def ticket_counts(tickets: list[dict] | None) -> tuple[int, int] | None:
@@ -267,13 +376,13 @@ def plans_by_ticket(folder: Path) -> dict[str, Path]:
     return plans
 
 
-def status_word(state: str) -> str:
-    """`in-progress` -> `in progress`, "" -> `no state`; other states as they are."""
-    return state.replace("-", " ") if state else "no state"
-
-
 def make_ticket(
-    raw: dict, folder: Path, output_dir: Path, plans: dict[str, Path], now: datetime
+    raw: dict,
+    folder: Path,
+    output_dir: Path,
+    plans: dict[str, Path],
+    now: datetime,
+    next_info: NextInfo | None = None,
 ) -> Ticket:
     """One ticket row. Its file is its plan, else its leaf file. Its updated time
     is that file's mtime, else the `tickets.toml` mtime of `folder` (its epic,
@@ -292,13 +401,15 @@ def make_ticket(
 
     state = ticket_state(raw)
     open_ticket = state not in ("done", "dropped")
+    ref = str(raw.get("ref") or "")
     return Ticket(
-        ref=str(raw.get("ref") or ""),
+        ref=ref,
         title=str(raw.get("title", "")),
-        word=status_word(state),
+        word=ticket_word(raw, next_info),
         path=file.relative_to(output_dir).as_posix() if file else None,
         updated=updated,
         stale=open_ticket and updated is not None and is_old(updated, now),
+        ready=next_info is not None and ref in next_info.ready,
     )
 
 
@@ -308,6 +419,7 @@ def epic_item(
     tickets: list[dict] | None,
     now: datetime,
     last_commit: datetime | None = None,
+    next_info: NextInfo | None = None,
 ) -> TreeItem:
     updated = newest_mtime(folder)
     children = doc_items(folder, output_dir, now, last_commit)
@@ -324,7 +436,7 @@ def epic_item(
         state = FINISHED if finished else OPEN
         word = "" if total == 0 else ("done" if finished else "in progress")
         plans = plans_by_ticket(folder)
-        epic_tickets = [make_ticket(t, folder, output_dir, plans, now) for t in raw_tickets]
+        epic_tickets = [make_ticket(t, folder, output_dir, plans, now, next_info) for t in raw_tickets]
 
     return TreeItem(
         kind="epic",
@@ -343,6 +455,7 @@ def build_tree(
     tickets: list[dict] | None,
     now: datetime,
     last_commit: datetime | None = None,
+    next_info: NextInfo | None = None,
 ) -> list[TreeItem]:
     """Forges, specs, walkthroughs, then epics at initiative level; each epic
     holds its own forges, specs and walkthroughs. Link paths are relative to the
@@ -352,14 +465,17 @@ def build_tree(
     no worktree or git failed); walkthroughs older than it are stale."""
     output_dir = initiative_dir.parent
     epics = [
-        epic_item(d, output_dir, tickets, now, last_commit)
+        epic_item(d, output_dir, tickets, now, last_commit, next_info)
         for d in sub_dirs(initiative_dir, "epic-")
     ]
     return doc_items(initiative_dir, output_dir, now, last_commit) + epics
 
 
 def initiative_tickets(
-    initiative_dir: Path, tickets: list[dict] | None, now: datetime
+    initiative_dir: Path,
+    tickets: list[dict] | None,
+    now: datetime,
+    next_info: NextInfo | None = None,
 ) -> list[Ticket]:
     """Tickets that sit directly in the initiative folder, not in an epic.
     `tickets.py` gives them the initiative folder name as their `epic`.
@@ -368,7 +484,7 @@ def initiative_tickets(
         return []
     plans = plans_by_ticket(initiative_dir)
     return [
-        make_ticket(t, initiative_dir, initiative_dir.parent, plans, now)
+        make_ticket(t, initiative_dir, initiative_dir.parent, plans, now, next_info)
         for t in tickets
         if t.get("epic") == initiative_dir.name
     ]

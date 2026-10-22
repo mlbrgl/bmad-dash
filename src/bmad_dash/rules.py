@@ -6,11 +6,14 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
 - Rows sort by newest last activity first, then those without activity.
 - A row is stale when its last activity is `STALE_AFTER` old or older,
   unless the initiative is finished.
-- The Status sentence lists waiting items: ticket counts by state, then
-  `forge open` and `spec to slice`. At most `MAX_WAITING` show, then `+n`.
-  Every state except `done` and `dropped` is open: `WAITING_STATES` first,
-  then any other state in the order it first appears in the tickets.
-  With nothing waiting it says `CONFIRM_CLOSE`.
+- The Status sentence lists waiting items: ticket counts by word (`ticket_word`,
+  the tree's word), then `forge open` and `spec to slice`. At most
+  `MAX_WAITING` show, then `+n`. Done and dropped are not counted. Words go
+  in `WORD_ORDER` first (every `waits on ...` counts as `waiting`), then any
+  other word in the order it first appears. With nothing waiting it says
+  `CONFIRM_CLOSE`.
+- Words have four colours (`word_class`): blue to act, green built, grey
+  nothing to do, warm blocked. A count takes its word's colour.
 - A finished initiative's tree shows no stale tags.
 - The PR button shows the PR of the highest branch that has one, in the
   stack starting at the row's branch (Stack's last PR). With Graphite, the
@@ -35,17 +38,22 @@ from bmad_dash.tree import (
     FINISHED,
     TreeItem,
     is_old,
-    status_word,
     ticket_counts,
-    ticket_state,
+    ticket_word,
 )
 
 if TYPE_CHECKING:  # types only: initiatives.py imports this module
     from bmad_dash.initiatives import Initiative, Worktree
     from bmad_dash.stack import GraphiteStack
 
-# Not-done ticket states, in the order the Status sentence lists them.
-WAITING_STATES = ["review", "in-progress", "planned", "backlog"]
+# Ticket words, in the order the Status sentence lists them.
+WORD_ORDER = ["blocked", "built", "in review", "in progress", "planned", "backlog", "waiting"]
+# CSS classes of the four word colours.
+LINK = "st-link"  # blue: act
+BUILT = "st-built"  # green
+MUTED = "st-muted"  # grey: nothing to do
+WARM = "st-warm"  # needs attention
+WAITS_ON = "waits on "
 MAX_WAITING = 2
 # Shown when nothing is open but the initiative file isn't marked done.
 CONFIRM_CLOSE = "confirm close or add work"
@@ -66,33 +74,55 @@ def has_open(items: list[TreeItem], kind: str) -> bool:
     )
 
 
-def open_states(tickets: list[dict]) -> list[str]:
-    """`WAITING_STATES`, then the other states except `done` and `dropped`,
-    in the order they first appear. A missing or null state reads as ""."""
-    states = list(WAITING_STATES)
-    for ticket in tickets:
-        state = ticket_state(ticket)
-        if state not in states and state not in ("done", "dropped"):
-            states.append(state)
-    return states
+def word_class(word: str, ready: bool = False) -> str:
+    """The colour class of a status word. `ready` matters only for `planned`
+    and `backlog`: blue when ready to start, else grey. Epic words use it too."""
+    if word == "blocked":
+        return WARM
+    if word == "built":
+        return BUILT
+    if word in ("done", "dropped", "waiting") or word.startswith(WAITS_ON):
+        return MUTED
+    if word in ("planned", "backlog"):
+        return LINK if ready else MUTED
+    return LINK
 
 
-def waiting_items(initiative: Initiative) -> list[str]:
-    """Ticket counts by status word, then doc cues."""
-    items = []
-    for state in open_states(initiative.tickets):
-        count = sum(1 for t in initiative.tickets if ticket_state(t) == state)
-        if count:
-            items.append(f"{count} {status_word(state)}")
+def count_word(word: str) -> str:
+    """The word a ticket is counted under: every `waits on ...` is `waiting`."""
+    return "waiting" if word.startswith(WAITS_ON) else word
+
+
+def waiting_items(initiative: Initiative) -> list[tuple[str, str]]:
+    """Ticket counts by word, then doc cues, as (text, colour class)."""
+    next_info = initiative.next_info
+    counts: dict[str, int] = {}
+    ready: set[str] = set()  # counted words with a ticket ready to start
+    for ticket in initiative.tickets:
+        word = ticket_word(ticket, next_info)
+        if word in ("done", "dropped"):
+            continue
+        key = count_word(word)
+        counts[key] = counts.get(key, 0) + 1
+        if next_info is not None and ticket.get("ref") in next_info.ready:
+            ready.add(key)
+    others = [word for word in counts if word not in WORD_ORDER]
+    items = [
+        (f"{counts[word]} {word}", word_class(word, word in ready))
+        for word in WORD_ORDER + others
+        if word in counts
+    ]
     if has_open(initiative.tree, "forge"):
-        items.append("forge open")
+        items.append(("forge open", LINK))
     if has_open(initiative.tree, "spec"):
-        items.append("spec to slice")
+        items.append(("spec to slice", LINK))
     return items
 
 
-def status_parts(initiative: Initiative) -> tuple[list[str], tuple[int, int] | None]:
-    """What the Status sentence says, as plain strings.
+def status_parts(
+    initiative: Initiative,
+) -> tuple[list[tuple[str, str]], tuple[int, int] | None]:
+    """What the Status sentence says, as (text, colour class) pairs.
 
     Returns (waiting, done_count):
     - waiting: up to `MAX_WAITING` waiting items then `+n`, or `[CONFIRM_CLOSE]`.
@@ -101,11 +131,11 @@ def status_parts(initiative: Initiative) -> tuple[list[str], tuple[int, int] | N
     """
     waiting = []
     if initiative.tickets is not None:
-        all_waiting = waiting_items(initiative) or [CONFIRM_CLOSE]
+        all_waiting = waiting_items(initiative) or [(CONFIRM_CLOSE, LINK)]
         waiting = all_waiting[:MAX_WAITING]
         hidden = len(all_waiting) - len(waiting)
         if hidden:
-            waiting.append(f"+{hidden}")
+            waiting.append((f"+{hidden}", LINK))
     counts = ticket_counts(initiative.tickets)
     done_count = counts if counts and counts[1] > 0 else None
     return waiting, done_count

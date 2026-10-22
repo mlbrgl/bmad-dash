@@ -19,11 +19,13 @@ from bmad_dash import commands
 from bmad_dash.rules import claimed_branches, stack_tips
 from bmad_dash.signals import Activity, last_activity, worktree_commits
 from bmad_dash.tree import (
+    NextInfo,
     Ticket,
     TreeItem,
     build_tree,
     frontmatter,
     initiative_tickets,
+    load_next,
     load_tickets,
 )
 
@@ -46,6 +48,9 @@ class Initiative:
     worktrees: list[Worktree] = field(default_factory=list)
     # From one `tickets.py status` call; None when it failed. Shared by the tree and Status.
     tickets: list[dict] | None = None
+    # From one `tickets.py next` call; None when it failed (then nothing
+    # `waits on` and nothing is ready). Shared by the tree and Status.
+    next_info: NextInfo | None = None
     tree: list[TreeItem] = field(default_factory=list)
     # Tickets directly in the initiative folder (no epic); shown after the epics.
     top_tickets: list[Ticket] = field(default_factory=list)
@@ -128,7 +133,11 @@ def make_initiative(
     the stack's branches, not just the worktree's HEAD. `claimed` holds the
     branches initiatives' worktrees have checked out; the walk skips them,
     except this initiative's own branch."""
-    tickets = load_tickets(root, initiative_dir)
+    # The two `tickets.py` calls are independent: run them side by side.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        next_future = pool.submit(load_next, root, initiative_dir)
+        tickets = load_tickets(root, initiative_dir)
+        next_info = next_future.result()
     branches = None
     if worktrees:
         own = worktrees[0].branch
@@ -142,8 +151,9 @@ def make_initiative(
         title=read_title(initiative_dir, fields),
         worktrees=worktrees,
         tickets=tickets,
-        tree=build_tree(initiative_dir, tickets, now, last_commit),
-        top_tickets=initiative_tickets(initiative_dir, tickets, now),
+        next_info=next_info,
+        tree=build_tree(initiative_dir, tickets, now, last_commit, next_info),
+        top_tickets=initiative_tickets(initiative_dir, tickets, now, next_info),
         activity=last_activity(initiative_dir, worktrees, commits),
         status=fields.get("status", ""),
     )

@@ -140,9 +140,9 @@ def test_status_words_and_empty_doc_status():
     forge, epic, spec, pending, done = rows
     assert '<span role="cell"></span>' in forge
     assert '<span role="cell"></span>' in spec
-    assert '<span role="cell" class="st-pending">in progress</span>' in epic
-    assert '<span role="cell" class="st-pending">in progress</span>' in pending
-    assert '<span role="cell" class="st-done">done</span>' in done
+    assert '<span role="cell" class="st-link">in progress</span>' in epic
+    assert '<span role="cell" class="st-link">in progress</span>' in pending
+    assert '<span role="cell" class="st-muted">done</span>' in done
 
 
 def test_updated_is_relative_with_exact_title_and_stale_tag():
@@ -387,12 +387,13 @@ def finished_tree(initiative: Initiative) -> Initiative:
 
 
 def test_status_ticket_counts_in_order_then_done():
-    tickets = ([{"state": "planned"}] + [{"state": "review"}] * 5
+    tickets = ([{"state": "planned"}] + [{"state": "review", "status": "built"}] * 5
                + [{"state": "dropped"}])
     html = render([finished_tree(signals_initiative(tickets))])
+    # No `next` info: a planned ticket is not ready, so it is grey.
     assert cell(html, "c-status") == (
-        '<span class="wait">5 review</span><span class="sep">·</span>'
-        '<span class="wait">1 planned</span><span class="sep">·</span>'
+        '<span class="st-built">5 built</span><span class="sep">·</span>'
+        '<span class="st-muted">1 planned</span><span class="sep">·</span>'
         '<span class="done-n">0/6 done</span>'
     )
 
@@ -420,11 +421,12 @@ def test_open_walkthrough_leaves_status_unchanged():
 
 
 def test_status_overflow_collapses_to_plus_n():
-    tickets = [{"state": "review"}, {"state": "planned"}, {"state": "backlog"}]
+    tickets = [{"state": "review", "status": "built"}, {"state": "planned"},
+               {"state": "backlog"}]
     html = render([signals_initiative(tickets)])
-    # review, planned, backlog, forge open: 2 shown, 2 hidden.
-    assert status_text(html) == "1 review·1 planned·+2·0/3 done"
-    assert '<span class="wait">+2</span>' in html
+    # built, planned, backlog, forge open: 2 shown, 2 hidden.
+    assert status_text(html) == "1 built·1 planned·+2·0/3 done"
+    assert '<span class="st-link">+2</span>' in html
 
 
 def test_status_all_dropped_asks_to_confirm_close_without_done_count():
@@ -436,29 +438,30 @@ def test_nothing_open_without_status_asks_to_confirm_close():
     tickets = [{"state": "done"}] * 4
     html = render([finished_tree(signals_initiative(tickets))])
     assert cell(html, "c-status") == (
-        '<span class="wait">confirm close or add work</span><span class="sep">·</span>'
+        '<span class="st-link">confirm close or add work</span><span class="sep">·</span>'
         '<span class="done-n">4/4 done</span>'
     )
     assert "show-finished" not in markup(html)
 
 
 def test_unknown_open_state_is_listed_not_confirm_close():
-    html = render([finished_tree(signals_initiative([{"state": "blocked"}]))])
-    assert status_text(html) == "1 blocked·0/1 done"
+    html = render([finished_tree(signals_initiative([{"state": "stuck"}]))])
+    assert status_text(html) == "1 stuck·0/1 done"
     assert "confirm close" not in html
 
 
 def test_unknown_states_follow_backlog_in_first_appearance_order():
-    tickets = [{"state": "waiting"}, {"state": "backlog"}, {"state": "blocked"},
-               {"state": "waiting"}, {"state": "done"}]
+    tickets = [{"state": "stuck"}, {"state": "backlog"}, {"state": "lost"},
+               {"state": "stuck"}, {"state": "done"}]
     initiative = finished_tree(signals_initiative(tickets))
-    assert waiting_items(initiative) == ["1 backlog", "2 waiting", "1 blocked"]
+    assert waiting_items(initiative) == [
+        ("1 backlog", "st-muted"), ("2 stuck", "st-link"), ("1 lost", "st-link")]
 
 
 def test_null_and_missing_state_count_as_no_state():
     tickets = [{"state": None}, {}, {"state": "backlog"}]
     initiative = finished_tree(signals_initiative(tickets))
-    assert waiting_items(initiative) == ["1 backlog", "2 no state"]
+    assert waiting_items(initiative) == [("1 backlog", "st-muted"), ("2 no state", "st-link")]
 
 
 def test_no_confirm_cue_when_tickets_unavailable():

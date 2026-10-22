@@ -23,6 +23,7 @@ from bmad_dash.rules import (
     is_stale,
     status_parts,
     tree_shows_stale,
+    word_class,
 )
 from bmad_dash.tree import STALE, Ticket, TreeItem
 
@@ -78,11 +79,11 @@ def name_cell(
     return f'<span role="cell" class="t-name d{depth}">{inner}</span>'
 
 
-def word_cell(word: str) -> str:
-    """One status word: done and dropped muted, anything else pending (accent)."""
+def word_cell(word: str, ready: bool = False) -> str:
+    """One status word, coloured by `word_class`; `ready` is a ticket's."""
     if not word:
         return '<span role="cell"></span>'
-    css_class = "st-done" if word in ("done", "dropped") else "st-pending"
+    css_class = word_class(word, ready)
     return f'<span role="cell" class="{css_class}">{escape(word)}</span>'
 
 
@@ -107,7 +108,7 @@ def ticket_row(ticket: Ticket, depth: int, now: datetime, show_stale: bool) -> s
     return tree_row(
         ticket.ref,
         name_cell(ticket.title, ticket.path, depth),
-        word_cell(ticket.word),
+        word_cell(ticket.word, ticket.ready),
         updated_cell(ticket.updated, show_stale and ticket.stale, now),
     )
 
@@ -257,7 +258,9 @@ def status_cell(initiative: Initiative, now: datetime) -> str:
     elif initiative.tickets is None:
         parts = [f'<span class="err">{TICKETS_FAILED}</span>']
     else:
-        parts = [f'<span class="wait">{escape(item)}</span>' for item in waiting]
+        parts = [
+            f'<span class="{css_class}">{escape(text)}</span>' for text, css_class in waiting
+        ]
     if done_count is not None:  # no `x/y done` without counted tickets
         parts.append(f'<span class="done-n">{done_count[0]}/{done_count[1]} done</span>')
     tag = '<span class="stale-tag">stale</span>' if is_stale(initiative, now) else ""

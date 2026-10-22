@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -8,15 +9,19 @@ import pytest
 
 from bmad_dash.initiatives import list_initiatives, read_title
 from bmad_dash.page import render_page
+from bmad_dash.rules import word_class
 from bmad_dash.signals import last_bullet
 from bmad_dash.tree import (
     FINISHED,
     OPEN,
     STALE,
     build_tree,
+    NextInfo,
     initiative_tickets,
+    load_next,
     load_tickets,
     read_memlog,
+    ticket_word,
 )
 
 NOW = datetime(2026, 10, 19, 12, 0)
@@ -545,8 +550,8 @@ def test_null_and_missing_state_read_as_no_state_in_tree_and_status(tmp_path):
     write_fake_tickets_py(root, f"print({json.dumps(json.dumps(data))})\n")
 
     html = render_page(list_initiatives(root, now=NOW), root)
-    assert html.count('<span role="cell" class="st-pending">no state</span>') == 2
-    assert '<span class="wait">2 no state</span>' in html
+    assert html.count('<span role="cell" class="st-link">no state</span>') == 2
+    assert '<span class="st-link">2 no state</span>' in html
     assert "0/2 done" in html
 
 
@@ -596,3 +601,189 @@ def test_read_title_empty_is_folder_name(tmp_path):
 def test_read_title_from_frontmatter(tmp_path):
     folder = write_initiative_file(tmp_path, "---\ntitle: 'My initiative'\n---\n")
     assert read_title(folder) == "My initiative"
+
+
+# --- ticket words and colours ---
+
+
+def word_of(raw: dict, next_info=None) -> str:
+    return ticket_word({"ref": "4.2", "title": "T", **raw}, next_info)
+
+
+def test_built_and_in_review_come_from_plan_status():
+    assert word_of({"state": "review", "status": "built"}) == "built"
+    assert word_of({"state": "review", "status": "in-review"}) == "in review"
+
+
+def test_blocked_by_status_or_blocked_at_beats_everything():
+    next_info = NextInfo(waiting={"4.2": ["4.1"]}, ready=set())
+    assert word_of({"state": "planned", "status": "blocked"}, next_info) == "blocked"
+    assert word_of({"state": "review", "status": "built", "blocked_at": "2026-10-20"}) == "blocked"
+
+
+def test_done_and_dropped_stay_as_they_are():
+    assert word_of({"state": "done", "status": "built"}) == "done"
+    assert word_of({"state": "dropped", "blocked_at": "x"}) == "dropped"
+
+
+def test_waits_on_beats_built_and_shows_first_ref_plus_count():
+    one = NextInfo(waiting={"4.2": ["4.3"]}, ready=set())
+    many = NextInfo(waiting={"4.2": ["3.10", "4.7"]}, ready=set())
+    assert word_of({"state": "planned"}, one) == "waits on 4.3"
+    assert word_of({"state": "planned", "status": "built"}, many) == "waits on 3.10 +1"
+
+
+def test_other_states_keep_their_word():
+    assert word_of({"state": "in-progress"}) == "in progress"
+    assert word_of({"state": None}) == "no state"
+    assert word_of({"state": "planned"}, NextInfo(waiting={}, ready={"4.2"})) == "planned"
+
+
+def next_json(ready=(), blocked=()) -> str:
+    return json.dumps({"ready_to_start": list(ready), "blocked": list(blocked)})
+
+
+def write_fake_next(root: Path, output: str, exit_code: int = 0) -> None:
+    write_fake_tickets_py(
+        root,
+        f"import sys\nprint({output!r})\nsys.exit({exit_code})\n",
+    )
+
+
+def test_load_next_maps_local_ids_to_the_epic_prefix(tmp_path, initiative):
+    blocked = [
+        {"ref": "4.2", "waiting_on": [3]},
+        {"ref": "2.1", "waiting_on": ["3.10", "4.7"]},
+        {"ref": "2.2", "waiting_on": []},
+    ]
+    write_fake_next(tmp_path, next_json([{"ref": "3.10"}], blocked))
+    info = load_next(tmp_path, initiative)
+    assert info == NextInfo(
+        waiting={"4.2": ["4.3"], "2.1": ["3.10", "4.7"]}, ready={"3.10"}
+    )
+
+
+@pytest.mark.parametrize("output", [
+    "not json",
+    "[]",
+    "{}",
+    '{"ready_to_start": [1], "blocked": []}',
+    '{"ready_to_start": [], "blocked": [{"ref": "1.1", "waiting_on": [null]}]}',
+])
+def test_load_next_wrong_shape_is_none(tmp_path, initiative, output):
+    write_fake_next(tmp_path, output)
+    assert load_next(tmp_path, initiative) is None
+
+
+def test_load_next_blocked_row_without_waiting_on_keeps_the_rest(tmp_path, initiative):
+    write_fake_next(
+        tmp_path,
+        '{"ready_to_start": [{"ref": "1.2"}], "blocked": [{"ref": "1.1", "unknown": "?"}]}',
+    )
+    info = load_next(tmp_path, initiative)
+    assert info.ready == {"1.2"}
+    assert info.waiting == {}
+
+
+def test_load_next_failure_and_missing_script_are_none(tmp_path, initiative):
+    assert load_next(tmp_path, initiative) is None
+    write_fake_next(tmp_path, next_json(), exit_code=1)
+    assert load_next(tmp_path, initiative) is None
+
+
+def test_load_next_runs_with_the_tickets_timeout(tmp_path, initiative, monkeypatch):
+    from bmad_dash import commands
+
+    write_fake_tickets_py(tmp_path, "")
+    calls = []
+
+    def hang(args, **kwargs):
+        calls.append((args[-2], kwargs["timeout"]))
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(commands, "run_process", hang)
+    assert load_next(tmp_path, initiative) is None
+    assert calls == [("next", commands.TICKETS_TIMEOUT)]
+
+
+def test_ready_flag_and_words_reach_the_tree(initiative):
+    epic = make_folder(initiative, "epic-x")
+    rows = [ticket("1.1", "planned"), ticket("1.2", "planned"), ticket("1.3", "review")]
+    rows[2]["status"] = "built"
+    info = NextInfo(waiting={"1.2": ["1.1"]}, ready={"1.1"})
+    tickets = only(build_tree(initiative, rows, NOW, None, info)).tickets
+    assert [(t.word, t.ready) for t in tickets] == [
+        ("planned", True), ("waits on 1.1", False), ("built", False)]
+    top = initiative_tickets(initiative, [ticket("1", "planned", "initiative-x")], NOW,
+                             NextInfo(waiting={}, ready={"1"}))
+    assert only(top).ready is True
+
+
+def test_word_classes():
+    assert word_class("blocked") == "st-warm"
+    assert word_class("built") == "st-built"
+    assert word_class("in review") == "st-link"
+    assert word_class("in progress") == "st-link"
+    assert word_class("no state") == "st-link"
+    for word in ("done", "dropped", "waits on 3.10 +1", "waiting"):
+        assert word_class(word) == "st-muted"
+    assert word_class("planned", ready=True) == "st-link"
+    assert word_class("backlog") == "st-muted"
+
+
+def project_with_next(tmp_path: Path, tickets: list[dict], next_output: str, next_exit=0):
+    root = tmp_path / "project"
+    root.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    make_folder(root / "_bmad-output" / "initiative-x", "epic-x")
+    data = json.dumps(json.dumps({"tickets": tickets}))
+    write_fake_tickets_py(
+        root,
+        "import sys\n"
+        f"if 'next' in sys.argv:\n    print({next_output!r})\n    sys.exit({next_exit})\n"
+        f"print({data})\n",
+    )
+    return root
+
+
+def status_cell_of(html: str) -> str:
+    return re.search(r'<div class="c-status" role="cell">(.*?)</div>', html).group(1)
+
+
+def test_page_shows_words_colours_and_waiting_count(tmp_path):
+    tickets = [
+        {**ticket("1.1", "review"), "status": "built"},
+        {**ticket("1.2", "planned")},
+        {**ticket("1.3", "planned")},
+        {**ticket("1.4", "in-progress"), "blocked_at": "2026-10-20"},
+    ]
+    blocked = [{"ref": "1.3", "waiting_on": [2]}]
+    root = project_with_next(
+        tmp_path, tickets, next_json([{"ref": "1.2"}], blocked))
+    html = render_page(list_initiatives(root, now=NOW), root)
+    assert '<span role="cell" class="st-built">built</span>' in html
+    assert '<span role="cell" class="st-link">planned</span>' in html
+    assert '<span role="cell" class="st-muted">waits on 1.2</span>' in html
+    assert '<span role="cell" class="st-warm">blocked</span>' in html
+    # Order: blocked, built, planned (ready: blue), waiting (grey); two shown, then +n.
+    assert status_cell_of(html) == (
+        '<span class="st-warm">1 blocked</span><span class="sep">·</span>'
+        '<span class="st-built">1 built</span><span class="sep">·</span>'
+        '<span class="st-link">+2</span><span class="sep">·</span>'
+        '<span class="done-n">0/4 done</span>'
+    )
+
+
+def test_failing_next_keeps_tree_and_counts_without_waits_or_ready(tmp_path):
+    tickets = [{**ticket("1.1", "planned")}, {**ticket("1.2", "planned")},
+               {**ticket("1.3", "done")}]
+    root = project_with_next(tmp_path, tickets, "", next_exit=1)
+    html = render_page(list_initiatives(root, now=NOW), root)
+    assert html.count('<span role="cell" class="st-muted">planned</span>') == 2
+    assert "waits on" not in html
+    assert status_cell_of(html) == (
+        '<span class="st-muted">2 planned</span><span class="sep">·</span>'
+        '<span class="done-n">1/3 done</span>'
+    )
+    assert "1/3 done" in html
+    assert "tickets unavailable" not in html
