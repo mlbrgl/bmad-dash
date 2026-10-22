@@ -74,17 +74,6 @@ def list_my_prs(root: Path) -> list[PullRequest] | None:
     return parse_prs(commands.run(GH_COMMAND, root, GH_TIMEOUT))
 
 
-def fetch_prs(root: Path) -> list[PullRequest] | None:
-    """The user's PRs in the repo at `root`, from one `gh pr list` call.
-    `[]` when the repo has no GitHub remote (gh is not run), None when git or gh fails."""
-    remote = has_github_remote(root)
-    if remote is None:
-        return None
-    if not remote:
-        return []
-    return list_my_prs(root)
-
-
 def fetch_branch_pr(root: Path, branch: str) -> list[PullRequest] | None:
     """The newest PR from `branch` as a one-item list, whoever wrote it.
     `[]` when the branch has no PR, None when gh fails."""

@@ -77,7 +77,8 @@ def gt_stack(root: Path) -> GraphiteStack | None:
 def load_topology(root: Path, stack: GraphiteStack | None) -> Topology:
     """What `stack_prs` needs, before the initiatives are known.
     `stack` is from `gt_stack`, run once per page load and shared with the
-    initiatives. No GitHub remote: `[]`, and gh doesn't run."""
+    initiatives. No GitHub remote: `[]`, and gh doesn't run. None when git
+    or gh fails."""
     remote = has_github_remote(root)
     if remote is None:
         return None

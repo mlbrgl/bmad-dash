@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from bmad_dash import commands as commands_module
-from bmad_dash.prs import GH_COMMAND, PullRequest, fetch_branch_pr, fetch_prs, last_pr
+from bmad_dash.prs import GH_COMMAND, PullRequest, fetch_branch_pr, last_pr
+from bmad_dash.stack import load_topology
 
 
 def pr(number, head, base="main", state="open"):
@@ -73,7 +74,7 @@ def test_cycle_gives_none():
     assert last_pr(prs, "b") is None
 
 
-# --- fetch_prs ---
+# --- load_topology without Graphite: the user's PRs ---
 
 GH_JSON = json.dumps([
     {"number": 7, "headRefName": "b", "baseRefName": "main", "state": "OPEN",
@@ -107,7 +108,7 @@ def done(stdout="", code=0):
 def test_fetch_parses_prs_and_states(monkeypatch):
     calls = []
     monkeypatch.setattr(commands_module.subprocess, "run", fake_run(calls, gh=done(GH_JSON)))
-    result = fetch_prs(Path("/root"))
+    result = load_topology(Path("/root"), None)
     assert [(p.number, p.head, p.base, p.state) for p in result] == [
         (7, "b", "main", "open"), (8, "c", "b", "draft"),
         (9, "d", "main", "merged"), (10, "e", "main", "closed"),
@@ -123,14 +124,14 @@ def test_no_github_remote_is_empty_and_runs_no_gh(monkeypatch):
     calls = []
     monkeypatch.setattr(commands_module.subprocess, "run",
                         fake_run(calls, remote="origin\tgit@gitlab.com:o/r.git (fetch)\n"))
-    assert fetch_prs(Path("/root")) == []
+    assert load_topology(Path("/root"), None) == []
     assert len(calls) == 1  # only git remote
 
 
 def test_no_remote_at_all_is_empty(monkeypatch):
     calls = []
     monkeypatch.setattr(commands_module.subprocess, "run", fake_run(calls, remote=""))
-    assert fetch_prs(Path("/root")) == []
+    assert load_topology(Path("/root"), None) == []
 
 
 @pytest.mark.parametrize("gh", [
@@ -144,7 +145,7 @@ def test_no_remote_at_all_is_empty(monkeypatch):
 ])
 def test_gh_failures_give_none(monkeypatch, gh):
     monkeypatch.setattr(commands_module.subprocess, "run", fake_run([], gh=gh))
-    assert fetch_prs(Path("/root")) is None
+    assert load_topology(Path("/root"), None) is None
 
 
 @pytest.mark.parametrize("error", [
@@ -160,12 +161,12 @@ def test_git_remote_failure_gives_none_and_runs_no_gh(monkeypatch, error):
         raise error
 
     monkeypatch.setattr(commands_module.subprocess, "run", run)
-    assert fetch_prs(Path("/root")) is None
+    assert load_topology(Path("/root"), None) is None
     assert calls == [["git", "remote", "-v"]]
 
 
 def test_real_repo_without_remote_is_empty(project):
-    assert fetch_prs(project) == []
+    assert load_topology(project, None) == []
 
 
 # --- fetch_branch_pr ---
