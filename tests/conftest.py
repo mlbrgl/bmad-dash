@@ -1,7 +1,10 @@
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
+
+from bmad_dash.server import make_server
 
 
 def git(cwd: Path, *args: str) -> None:
@@ -105,3 +108,21 @@ def files_project(project: Path) -> Path:
     (out / "link-in.md").symlink_to(out / "spec-x" / "spec-x.md")
     (out / "link-out.md").symlink_to(project / "secret.md")
     return project
+
+
+@pytest.fixture
+def serve():
+    """Start servers: `serve(root, **kwargs)` runs `make_server(root, 0, **kwargs)`
+    on a daemon thread and returns it. Every server is shut down at teardown."""
+    servers = []
+
+    def start(root: Path, **kwargs):
+        server = make_server(root, 0, **kwargs)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return server
+
+    yield start
+    for server in servers:
+        server.shutdown()
+        server.server_close()

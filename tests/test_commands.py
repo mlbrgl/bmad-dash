@@ -1,5 +1,4 @@
 import subprocess
-import threading
 import urllib.request
 from urllib.parse import urlencode
 
@@ -7,7 +6,7 @@ import pytest
 
 from bmad_dash import commands
 from bmad_dash.initiatives import list_worktrees, worktree_id
-from bmad_dash.server import make_server, validate_root
+from bmad_dash.server import validate_root
 
 from test_vscode import send
 
@@ -91,27 +90,17 @@ def test_validate_root_failure_is_not_a_git_repo(project, fail_commands):
     assert validate_root(project) == f"{project} is not a git repository"
 
 
-def serve(project):
-    server = make_server(project, 0, launch=lambda path: None)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
-
-
-def test_page_renders_when_everything_fails(project, fail_commands):
+def test_page_renders_when_everything_fails(project, fail_commands, serve):
     # A tickets.py to run, so its failure (not its absence) is what shows.
     script = project / "_bmad" / "method" / "scripts" / "tickets.py"
     script.parent.mkdir(parents=True)
     script.write_text("")
     fail_commands()
-    server = serve(project)
-    try:
-        url = f"http://127.0.0.1:{server.server_port}/"
-        with urllib.request.urlopen(url) as response:
-            assert response.status == 200
-            html = response.read().decode()
-    finally:
-        server.shutdown()
-        server.server_close()
+    server = serve(project, launch=lambda path: None)
+    url = f"http://127.0.0.1:{server.server_port}/"
+    with urllib.request.urlopen(url) as response:
+        assert response.status == 200
+        html = response.read().decode()
     assert "Matched one" in html
     assert "feature-a" not in html
     assert html.count("no worktree") == 5  # every row
@@ -119,14 +108,10 @@ def test_page_renders_when_everything_fails(project, fail_commands):
     assert "Couldn't read tickets: tickets.py failed" in html
 
 
-def test_vscode_post_when_git_fails_redirects_to_failure(project, fail_commands):
+def test_vscode_post_when_git_fails_redirects_to_failure(project, fail_commands, serve):
     body = urlencode({"id": worktree_id(project), "slug": "initiative-shared"})
     fail_commands()
-    server = serve(project)
-    try:
-        status, response = send(server, body=body)
-    finally:
-        server.shutdown()
-        server.server_close()
+    server = serve(project, launch=lambda path: None)
+    status, response = send(server, body=body)
     assert status == 303
     assert response.getheader("Location") == "/?vscode_failed=initiative-shared"

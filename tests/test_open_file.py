@@ -1,5 +1,4 @@
 import subprocess
-import threading
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -13,7 +12,7 @@ from bmad_dash.opener import (
     resolve_open_path,
     wrapper_page,
 )
-from bmad_dash.server import default_open_file, make_server
+from bmad_dash.server import default_open_file
 
 from conftest import git
 from test_vscode import get_page, send
@@ -71,15 +70,11 @@ def walk_project(files_project: Path) -> Path:
 
 
 @pytest.fixture
-def opener(walk_project):
-    """A live server with a fake file opener. Yields (server, opened calls)."""
+def opener(walk_project, serve):
+    """A live server with a fake file opener. Returns (server, opened calls)."""
     opened = []
-    server = make_server(walk_project, 0, open_file=lambda path, line: opened.append((path, line)))
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield server, opened
-    server.shutdown()
-    server.server_close()
+    server = serve(walk_project, open_file=lambda path, line: opened.append((path, line)))
+    return server, opened
 
 
 def post_open(server, fields=None, headers=None, wt_file=None):
@@ -328,24 +323,18 @@ def test_body_too_big_is_400(opener, walk_project):
     assert opened == []
 
 
-def test_code_missing_is_500(walk_project):
+def test_code_missing_is_500(walk_project, serve):
     calls = []
 
     def broken(path, line):
         calls.append(path)
         raise FileNotFoundError("code")
 
-    server = make_server(walk_project, 0, open_file=broken)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        status, response = post_open(server, wt_file=a_py(walk_project))
-        assert status == 500
-        assert response.body == b""
-        assert calls == [a_py(walk_project).resolve()]
-    finally:
-        server.shutdown()
-        server.server_close()
+    server = serve(walk_project, open_file=broken)
+    status, response = post_open(server, wt_file=a_py(walk_project))
+    assert status == 500
+    assert response.body == b""
+    assert calls == [a_py(walk_project).resolve()]
 
 
 def test_vscode_still_refuses_null_origin(opener):

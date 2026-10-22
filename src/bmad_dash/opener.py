@@ -12,6 +12,8 @@ import re
 from html import escape, unescape
 from pathlib import Path, PurePath
 
+from bmad_dash import assets
+
 MESSAGE_TYPE = "bmad-dash:open-file"
 
 # Injected into the framed walkthrough. It can't call any route itself: it
@@ -43,25 +45,25 @@ RELAY_SCRIPT = """
 """.replace("%MESSAGE_TYPE%", MESSAGE_TYPE)  # .format() would need every JS brace doubled
 
 # Snackbar: fixed bottom-centre, ink background, surface text, rounded.md, 14px.
+# Its colours and font come from the dashboard's tokens.css, inlined at
+# %TOKENS% (with .replace, since .format() would need every CSS brace doubled).
 WRAPPER_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>{title}</title>
 <style>
+%TOKENS%
 html, body {{ margin: 0; height: 100%; }}
 #bmad-dash-frame {{ display: block; width: 100%; height: 100vh; border: 0; }}
 #bmad-dash-open-snack {{
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
   z-index: 2147483647; padding: 10px 16px; border-radius: 6px;
-  background: #18181B; color: #FFFFFF;
-  font: 400 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  background: var(--ink); color: var(--surface);
+  font: 400 14px/1.4 var(--sans);
   opacity: 0; pointer-events: none; transition: opacity 0.15s;
 }}
 #bmad-dash-open-snack.bmad-dash-open-snack-on {{ opacity: 1; }}
-@media (prefers-color-scheme: dark) {{
-  #bmad-dash-open-snack {{ background: #F4F4F5; color: #141417; }}
-}}
 </style>
 </head>
 <body>
@@ -141,7 +143,13 @@ def read_title(html: bytes, fallback: str) -> str:
 def wrapper_page(page_path: str, title: str) -> str:
     """The dashboard page that frames the walkthrough at `page_path`
     (a URL path like `/file/...`) and opens its links. `title` is plain text."""
-    return WRAPPER_TEMPLATE.format(
+    # Tokens go in before .format(), so a title can't hold the placeholder.
+    # Their braces are doubled so .format() keeps them as they are.
+    tokens = assets.read("tokens.css").rstrip("\n")
+    template = WRAPPER_TEMPLATE.replace(
+        "%TOKENS%", tokens.replace("{", "{{").replace("}", "}}")
+    )
+    return template.format(
         title=escape(title),
         frame_src=escape(page_path + "?frame=1"),
         message_type=MESSAGE_TYPE,

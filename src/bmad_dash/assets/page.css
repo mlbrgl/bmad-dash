@@ -1,0 +1,107 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--surface-outer); color: var(--ink);
+       font: 14px/1.45 var(--sans); padding: 32px 24px 64px; }
+a { color: inherit; text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+code { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--ink-muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden;
+           clip: rect(0 0 0 0); white-space: nowrap; }
+
+.page { max-width: 1200px; margin: 0 auto; background: var(--surface);
+        border: 1px solid var(--line); border-radius: 10px; padding: 36px 40px 28px; }
+.hdr { display: flex; align-items: baseline; gap: 14px; margin-bottom: 22px; }
+.hdr h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+.path { color: var(--ink-muted); font: 12px var(--mono); }
+.hdr .err { margin-left: auto; font-size: 13px; }
+
+/* Initiative grid: header and rows share one column template. */
+.col-head, .init { display: grid; grid-template-columns: var(--cols);
+                   column-gap: 24px; align-items: start; }
+.col-head { font-size: 12px; color: var(--ink-muted); padding: 0 0 8px;
+            border-bottom: 1px solid var(--line); }
+.init { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.init > [role="cell"] { grid-row: 1; }
+.init > .panel { grid-row: 2; grid-column: 1 / -1; }
+.c-title, .c-wt, .c-act, .wt { display: flex; flex-direction: column; min-width: 0; }
+.ttl { display: flex; gap: 8px; align-items: baseline; font-weight: 600; font-size: 14.5px; }
+.caret { color: var(--ink-muted); font-size: 10px; width: 10px; flex: none; }
+/* A 24x24 hit area around the 10px caret, without moving the title. */
+.toggle { display: flex; align-items: center; justify-content: center; flex: none;
+          width: 24px; height: 24px; margin: -5px -7px; background: none; border: 0;
+          padding: 0; border-radius: 4px; cursor: pointer; }
+.toggle:hover .caret { color: var(--ink); }
+.toggle[aria-expanded="false"] .caret::before { content: "\25B6"; }
+.toggle[aria-expanded="true"] .caret::before { content: "\25BC"; }
+.slug { font: 12px var(--mono); color: var(--ink-muted); margin: 2px 0 0 18px; }
+form.vscode { margin: 0; min-width: 0; }
+form.vscode + form.vscode { margin-top: 6px; }
+/* The whole worktree block is a button that opens VS Code. */
+.wt { width: 100%; background: none; border: 0; padding: 0; font: inherit;
+      color: inherit; text-align: left; cursor: pointer; }
+.wt:hover .wt-name { text-decoration: underline; }
+.c-wt .err { font-size: 12px; margin-top: 2px; }
+.wt-name { font: 13px var(--mono); }
+.wt-branch { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+.c-wt .muted, .c-act .muted { font-size: 13px; }
+.slug, .wt-name, .wt-branch, .what { overflow: hidden; text-overflow: ellipsis;
+                                     white-space: nowrap; }
+.when { font-size: 13px; font-variant-numeric: tabular-nums; }
+.what { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+.c-status { font-size: 13px; font-variant-numeric: tabular-nums; }
+.sep { color: var(--ink-muted); padding: 0 4px; }
+.wait { color: var(--accent); }
+.done-n { color: var(--ink-muted); }
+.err { color: var(--ink-2); }
+.when.is-stale { color: var(--stale); }
+.is-finished, .is-finished .what, .is-finished .wait { color: var(--ink-muted); }
+
+/* Empty states and the Show finished link */
+.empty { padding: 16px 0; color: var(--ink-2); }
+.show-finished { margin-top: 18px; padding: 0; background: none; border: 0;
+                 font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.show-finished:hover { text-decoration: underline; }
+#finished { margin-top: 8px; }
+
+/* Actions */
+/* Buttons side by side on one line, right-aligned. Like the mockup, the pair
+   may be a few px wider than the column and spill into the gap on its left. */
+.c-btns { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+.btn { display: inline-block; font: inherit; font-size: 13px; font-weight: 500;
+       line-height: 1.45; padding: 6px 12px; border-radius: 6px; white-space: nowrap;
+       cursor: pointer; border: 1px solid transparent; }
+.btn:hover { text-decoration: none; }
+.btn-1 { background: var(--accent); color: var(--accent-fg); }
+.btn-2 { background: transparent; border-color: var(--line); color: var(--ink); }
+.pr-icon { vertical-align: -3px; margin-right: 4px; }
+.pr-open { color: var(--accent); }
+.pr-muted { color: var(--ink-muted); }
+
+/* Tree panel: its own grid, same for every row. */
+.panel { margin-top: 16px; padding: 8px 16px; background: var(--panel);
+         border-radius: 8px; font-size: 13px; }
+.panel[hidden] { display: none; }
+.t-note { font-size: 12px; padding: 4px 0 6px; }
+.t-row { display: grid; grid-template-columns: var(--tcols); column-gap: 16px;
+         align-items: baseline; padding: 6px 0; }
+.t-head { font-size: 12px; color: var(--ink-muted); border-bottom: 1px solid var(--line);
+          padding-bottom: 6px; margin-bottom: 2px; }
+.t-kind { font: 12px var(--mono); color: var(--ink-muted); min-width: 0; overflow: hidden;
+          text-overflow: ellipsis; white-space: nowrap; }
+/* Only the name truncates; the report link stays visible. */
+.t-name { display: flex; align-items: baseline; min-width: 0; }
+.name-link, .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                         white-space: nowrap; }
+.d1 { padding-left: 20px; } .d2 { padding-left: 40px; }
+.name-link { color: var(--ink); }
+.report-link { flex: none; color: var(--ink-muted); margin-left: 8px; font-size: 12px; }
+.st-pending { color: var(--accent); }
+.st-done { color: var(--ink-muted); }
+/* The time never breaks; the stale tag wraps below it when the column is too narrow. */
+.upd { font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.upd-time { white-space: nowrap; }
+.stale-tag { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; color: var(--stale);
+             background: var(--stale-soft); padding: 1px 6px; border-radius: 4px; }

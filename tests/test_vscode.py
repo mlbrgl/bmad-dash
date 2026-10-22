@@ -1,24 +1,18 @@
 import http.client
 import subprocess
-import threading
 from urllib.parse import urlencode
 
 import pytest
 
 from bmad_dash.initiatives import list_worktrees, worktree_id
-from bmad_dash.server import default_launch, make_server
+from bmad_dash.server import default_launch
 
 
 @pytest.fixture
-def vscode(project):
-    """A live server with a fake launcher. Yields (server, launched paths)."""
+def vscode(project, serve):
+    """A live server with a fake launcher. Returns (server, launched paths)."""
     launched = []
-    server = make_server(project, 0, launch=launched.append)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield server, launched
-    server.shutdown()
-    server.server_close()
+    return serve(project, launch=launched.append), launched
 
 
 def send(server, method="POST", body=None, headers=None, path="/vscode"):
@@ -167,25 +161,19 @@ def test_post_elsewhere_is_404(vscode, project):
     assert launched == []
 
 
-def test_code_missing_redirects_with_flag(project):
+def test_code_missing_redirects_with_flag(project, serve):
     calls = []
 
     def broken_launch(path):
         calls.append(path)
         raise FileNotFoundError("code")
 
-    server = make_server(project, 0, launch=broken_launch)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        body = urlencode({"id": worktree_id(project), "slug": "initiative-shared"})
-        status, response = send(server, body=body)
-        assert status == 303
-        assert response.getheader("Location") == "/?vscode_failed=initiative-shared"
-        assert calls == [project]
-    finally:
-        server.shutdown()
-        server.server_close()
+    server = serve(project, launch=broken_launch)
+    body = urlencode({"id": worktree_id(project), "slug": "initiative-shared"})
+    status, response = send(server, body=body)
+    assert status == 303
+    assert response.getheader("Location") == "/?vscode_failed=initiative-shared"
+    assert calls == [project]
 
 
 def test_default_launch_runs_code_without_shell_or_wait(monkeypatch, tmp_path):

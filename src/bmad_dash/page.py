@@ -3,6 +3,9 @@
 The page is a server-rendered ARIA grid. Each initiative is one row of five
 cells, with its tree as a full-width panel under it. The only script opens
 and closes panels and remembers which ones are open.
+
+What a row says comes from `rules.py`; this module only turns it into HTML.
+The CSS and JS live in `assets/` and are inlined.
 """
 
 from collections.abc import Sequence
@@ -11,9 +14,11 @@ from html import escape
 from pathlib import Path
 from urllib.parse import quote, urlencode
 
+from bmad_dash import assets
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
-from bmad_dash.prs import PullRequest, last_pr
-from bmad_dash.tree import FINISHED, STALE, Ticket, TreeItem, is_old, status_word, ticket_counts
+from bmad_dash.prs import PullRequest
+from bmad_dash.rules import by_activity, is_stale, row_pr, status_parts
+from bmad_dash.tree import STALE, Ticket, TreeItem
 
 
 def display_path(path: Path) -> str:
@@ -220,41 +225,7 @@ def activity_cell(initiative: Initiative, now: datetime) -> str:
 
 SEP = '<span class="sep">·</span>'
 
-# Not-done ticket states, in the order the Status sentence lists them.
-WAITING_STATES = ["review", "in-progress", "planned", "backlog"]
-MAX_WAITING = 2
 TICKETS_FAILED = "Couldn't read tickets: tickets.py failed"
-# Shown when nothing is open but the initiative file isn't marked done.
-CONFIRM_CLOSE = "confirm close or add work"
-
-
-def is_stale(initiative: Initiative, now: datetime) -> bool:
-    """Last activity is STALE_AFTER old or older. Finished initiatives never are."""
-    activity = initiative.activity
-    return (not initiative.finished and activity is not None
-            and is_old(activity.when, now))
-
-
-def has_open(items: list[TreeItem], kind: str) -> bool:
-    """Any item of `kind`, at any depth, not finished (stale counts as open)."""
-    return any(
-        (item.kind == kind and item.state != FINISHED) or has_open(item.children, kind)
-        for item in items
-    )
-
-
-def waiting_items(initiative: Initiative) -> list[str]:
-    """Ticket counts by status word, then doc cues."""
-    items = []
-    for state in WAITING_STATES:
-        count = sum(1 for t in initiative.tickets if t.get("state") == state)
-        if count:
-            items.append(f"{count} {status_word(state)}")
-    if has_open(initiative.tree, "forge"):
-        items.append("forge open")
-    if has_open(initiative.tree, "spec"):
-        items.append("spec to slice")
-    return items
 
 
 def status_cell(initiative: Initiative, now: datetime) -> str:
@@ -264,20 +235,15 @@ def status_cell(initiative: Initiative, now: datetime) -> str:
     waiting items; it comes from the initiative file, so it shows even when
     `tickets.py` failed.
     """
+    waiting, done_count = status_parts(initiative)
     if initiative.finished:
         parts = [f'<span class="done-n">{escape(initiative.status)}</span>']
     elif initiative.tickets is None:
         parts = [f'<span class="err">{TICKETS_FAILED}</span>']
     else:
-        waiting = waiting_items(initiative) or [CONFIRM_CLOSE]
-        shown = waiting[:MAX_WAITING]
-        hidden = len(waiting) - len(shown)
-        if hidden:
-            shown.append(f"+{hidden}")
-        parts = [f'<span class="wait">{escape(item)}</span>' for item in shown]
-    counts = ticket_counts(initiative.tickets)
-    if counts and counts[1] > 0:  # no `x/y done` without counted tickets
-        parts.append(f'<span class="done-n">{counts[0]}/{counts[1]} done</span>')
+        parts = [f'<span class="wait">{escape(item)}</span>' for item in waiting]
+    if done_count is not None:  # no `x/y done` without counted tickets
+        parts.append(f'<span class="done-n">{done_count[0]}/{done_count[1]} done</span>')
     tag = '<span class="stale-tag">stale</span>' if is_stale(initiative, now) else ""
     return f'<div class="c-status" role="cell">{SEP.join(parts)}{tag}</div>'
 
@@ -321,16 +287,6 @@ def pr_link(pr: PullRequest) -> str:
         f'{icon}<span class="sr-only">{state} pull request </span>#{pr.number}'
         f'<span class="sr-only"> (opens in new tab)</span></a>'
     )
-
-
-def row_pr(initiative: Initiative, prs: Sequence[PullRequest] | None) -> PullRequest | None:
-    """The last PR of the stack starting at the row's worktree branch, or None."""
-    if not prs or not initiative.worktrees:
-        return None
-    branch = initiative.worktrees[0].branch
-    if branch == "detached":
-        return None
-    return last_pr(list(prs), branch)
 
 
 def actions_cell(initiative: Initiative, pr: PullRequest | None = None) -> str:
@@ -381,14 +337,6 @@ def header_row() -> str:
     return f'<div class="col-head" role="row">{"".join(cells)}</div>'
 
 
-def by_activity(initiatives: list[Initiative]) -> list[Initiative]:
-    """Newest last activity first, then those without activity.
-    Sorting is stable, so ties keep their incoming (slug) order."""
-    active = [i for i in initiatives if i.activity is not None]
-    quiet = [i for i in initiatives if i.activity is None]
-    return sorted(active, key=lambda i: i.activity.when, reverse=True) + quiet
-
-
 def newest_index(initiatives: list[Initiative]) -> int | None:
     """Index of the initiative with a tree and the newest activity (first on
     ties), or None."""
@@ -399,191 +347,6 @@ def newest_index(initiatives: list[Initiative]) -> int | None:
         if best is None or initiative.activity.when > initiatives[best].activity.when:
             best = index
     return best
-
-
-# Tokens from DESIGN.md frontmatter.
-STYLE = """
-:root {
-  --surface: #FFFFFF; --surface-outer: #F4F4F5; --panel: #F0F0F2; --line: #E4E4E7;
-  --ink: #18181B; --ink-2: #52525B; --ink-muted: #6B6B74;
-  --accent: #2563EB; --accent-fg: #FFFFFF; --accent-soft: #EFF4FF;
-  --stale: #A34A06; --stale-soft: #FEF6E7;
-  --cols: minmax(0, 2.4fr) 170px minmax(0, 1.8fr) minmax(0, 2.2fr) 150px;
-  --tcols: 64px minmax(0, 1fr) 120px 110px;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface: #141417; --surface-outer: #0B0B0D; --panel: #1F1F24; --line: #2A2A30;
-    --ink: #F4F4F5; --ink-2: #A1A1AA; --ink-muted: #8B8B94;
-    --accent: #6B9BFF; --accent-fg: #0B0B0D; --accent-soft: #18233A;
-    --stale: #F0B060; --stale-soft: #2E2414;
-  }
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--surface-outer); color: var(--ink);
-       font: 14px/1.45 var(--sans); padding: 32px 24px 64px; }
-a { color: inherit; text-decoration: none; }
-a:hover { text-decoration: underline; }
-a:focus-visible, button:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
-}
-code { font-family: var(--mono); font-size: 12px; }
-.muted { color: var(--ink-muted); }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden;
-           clip: rect(0 0 0 0); white-space: nowrap; }
-
-.page { max-width: 1200px; margin: 0 auto; background: var(--surface);
-        border: 1px solid var(--line); border-radius: 10px; padding: 36px 40px 28px; }
-.hdr { display: flex; align-items: baseline; gap: 14px; margin-bottom: 22px; }
-.hdr h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
-.path { color: var(--ink-muted); font: 12px var(--mono); }
-.hdr .err { margin-left: auto; font-size: 13px; }
-
-/* Initiative grid: header and rows share one column template. */
-.col-head, .init { display: grid; grid-template-columns: var(--cols);
-                   column-gap: 24px; align-items: start; }
-.col-head { font-size: 12px; color: var(--ink-muted); padding: 0 0 8px;
-            border-bottom: 1px solid var(--line); }
-.init { padding: 16px 0; border-bottom: 1px solid var(--line); }
-.init > [role="cell"] { grid-row: 1; }
-.init > .panel { grid-row: 2; grid-column: 1 / -1; }
-.c-title, .c-wt, .c-act, .wt { display: flex; flex-direction: column; min-width: 0; }
-.ttl { display: flex; gap: 8px; align-items: baseline; font-weight: 600; font-size: 14.5px; }
-.caret { color: var(--ink-muted); font-size: 10px; width: 10px; flex: none; }
-/* A 24x24 hit area around the 10px caret, without moving the title. */
-.toggle { display: flex; align-items: center; justify-content: center; flex: none;
-          width: 24px; height: 24px; margin: -5px -7px; background: none; border: 0;
-          padding: 0; border-radius: 4px; cursor: pointer; }
-.toggle:hover .caret { color: var(--ink); }
-.toggle[aria-expanded="false"] .caret::before { content: "\\25B6"; }
-.toggle[aria-expanded="true"] .caret::before { content: "\\25BC"; }
-.slug { font: 12px var(--mono); color: var(--ink-muted); margin: 2px 0 0 18px; }
-form.vscode { margin: 0; min-width: 0; }
-form.vscode + form.vscode { margin-top: 6px; }
-/* The whole worktree block is a button that opens VS Code. */
-.wt { width: 100%; background: none; border: 0; padding: 0; font: inherit;
-      color: inherit; text-align: left; cursor: pointer; }
-.wt:hover .wt-name { text-decoration: underline; }
-.c-wt .err { font-size: 12px; margin-top: 2px; }
-.wt-name { font: 13px var(--mono); }
-.wt-branch { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
-.c-wt .muted, .c-act .muted { font-size: 13px; }
-.slug, .wt-name, .wt-branch, .what { overflow: hidden; text-overflow: ellipsis;
-                                     white-space: nowrap; }
-.when { font-size: 13px; font-variant-numeric: tabular-nums; }
-.what { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
-.c-status { font-size: 13px; font-variant-numeric: tabular-nums; }
-.sep { color: var(--ink-muted); padding: 0 4px; }
-.wait { color: var(--accent); }
-.done-n { color: var(--ink-muted); }
-.err { color: var(--ink-2); }
-.when.is-stale { color: var(--stale); }
-.is-finished, .is-finished .what, .is-finished .wait { color: var(--ink-muted); }
-
-/* Empty states and the Show finished link */
-.empty { padding: 16px 0; color: var(--ink-2); }
-.show-finished { margin-top: 18px; padding: 0; background: none; border: 0;
-                 font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer; }
-.show-finished:hover { text-decoration: underline; }
-#finished { margin-top: 8px; }
-
-/* Actions */
-/* Buttons side by side on one line, right-aligned. Like the mockup, the pair
-   may be a few px wider than the column and spill into the gap on its left. */
-.c-btns { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
-.btn { display: inline-block; font: inherit; font-size: 13px; font-weight: 500;
-       line-height: 1.45; padding: 6px 12px; border-radius: 6px; white-space: nowrap;
-       cursor: pointer; border: 1px solid transparent; }
-.btn:hover { text-decoration: none; }
-.btn-1 { background: var(--accent); color: var(--accent-fg); }
-.btn-2 { background: transparent; border-color: var(--line); color: var(--ink); }
-.pr-icon { vertical-align: -3px; margin-right: 4px; }
-.pr-open { color: var(--accent); }
-.pr-muted { color: var(--ink-muted); }
-
-/* Tree panel: its own grid, same for every row. */
-.panel { margin-top: 16px; padding: 8px 16px; background: var(--panel);
-         border-radius: 8px; font-size: 13px; }
-.panel[hidden] { display: none; }
-.t-note { font-size: 12px; padding: 4px 0 6px; }
-.t-row { display: grid; grid-template-columns: var(--tcols); column-gap: 16px;
-         align-items: baseline; padding: 6px 0; }
-.t-head { font-size: 12px; color: var(--ink-muted); border-bottom: 1px solid var(--line);
-          padding-bottom: 6px; margin-bottom: 2px; }
-.t-kind { font: 12px var(--mono); color: var(--ink-muted); min-width: 0; overflow: hidden;
-          text-overflow: ellipsis; white-space: nowrap; }
-/* Only the name truncates; the report link stays visible. */
-.t-name { display: flex; align-items: baseline; min-width: 0; }
-.name-link, .name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis;
-                         white-space: nowrap; }
-.d1 { padding-left: 20px; } .d2 { padding-left: 40px; }
-.name-link { color: var(--ink); }
-.report-link { flex: none; color: var(--ink-muted); margin-left: 8px; font-size: 12px; }
-.st-pending { color: var(--accent); }
-.st-done { color: var(--ink-muted); }
-/* The time never breaks; the stale tag wraps below it when the column is too narrow. */
-.upd { font-size: 12px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
-.upd-time { white-space: nowrap; }
-.stale-tag { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; color: var(--stale);
-             background: var(--stale-soft); padding: 1px 6px; border-radius: 4px; }
-"""
-
-# Opens and closes panels; saves open slugs as a JSON list. An empty list
-# counts as saved. Storage can throw (blocked, private mode): ignore it.
-SCRIPT = """
-(function () {
-  var key = document.querySelector("[data-storage-key]").getAttribute("data-storage-key");
-  var toggles = Array.prototype.slice.call(document.querySelectorAll("button.toggle"));
-
-  function isOpen(button) {
-    return button.getAttribute("aria-expanded") === "true";
-  }
-  function setOpen(button, open) {
-    button.setAttribute("aria-expanded", open ? "true" : "false");
-    document.getElementById(button.getAttribute("aria-controls")).hidden = !open;
-  }
-  function save() {
-    var slugs = toggles.filter(isOpen).map(function (b) { return b.dataset.slug; });
-    try { localStorage.setItem(key, JSON.stringify(slugs)); } catch (e) {}
-  }
-
-  var saved = null;
-  try {
-    var raw = localStorage.getItem(key);
-    if (raw !== null) {
-      var value = JSON.parse(raw);
-      if (Array.isArray(value)) saved = value;
-    }
-  } catch (e) {}
-  // Finished rows always start closed.
-  if (saved !== null) {
-    toggles.forEach(function (b) {
-      var finished = b.closest(".is-finished") !== null;
-      setOpen(b, !finished && saved.indexOf(b.dataset.slug) !== -1);
-    });
-  }
-
-  toggles.forEach(function (button) {
-    button.addEventListener("click", function () {
-      setOpen(button, !isOpen(button));
-      save();
-    });
-  });
-
-  // Show finished (n) <-> Hide finished. Not remembered.
-  var more = document.getElementById("show-finished");
-  if (more) {
-    var label = more.textContent;
-    more.addEventListener("click", function () {
-      var open = !isOpen(more);
-      setOpen(more, open);
-      more.textContent = open ? "Hide finished" : label;
-    });
-  }
-})();
-"""
 
 
 def page_content(
@@ -652,19 +415,26 @@ def render_page(
     )
     github = f'<span class="err">{GITHUB_FAILED}</span>' if prs is None else ""
     storage_key = escape("bmad-dash:open:" + str(root))
+    # Colour tokens (from DESIGN.md frontmatter) first, then the page's own rules.
+    style = assets.read("tokens.css") + assets.read("page.css")
+    # Opens and closes panels; saves open slugs as a JSON list. An empty list
+    # counts as saved. Storage can throw (blocked, private mode): it is ignored.
+    script = assets.read("page.js")
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>bmad-dash: {root_text}</title>
-<style>{STYLE}</style>
+<style>
+{style}</style>
 </head>
 <body>
 <main class="page" data-storage-key="{storage_key}">
 <header class="hdr"><h1>Initiatives</h1><span class="path">{root_text}</span>{github}</header>
 {content}
-<script>{SCRIPT}</script>
+<script>
+{script}</script>
 </main>
 </body>
 </html>

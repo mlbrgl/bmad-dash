@@ -1,0 +1,18 @@
+:root {
+  --surface: #FFFFFF; --surface-outer: #F4F4F5; --panel: #F0F0F2; --line: #E4E4E7;
+  --ink: #18181B; --ink-2: #52525B; --ink-muted: #6B6B74;
+  --accent: #2563EB; --accent-fg: #FFFFFF; --accent-soft: #EFF4FF;
+  --stale: #A34A06; --stale-soft: #FEF6E7;
+  --cols: minmax(0, 2.4fr) 170px minmax(0, 1.8fr) minmax(0, 2.2fr) 150px;
+  --tcols: 64px minmax(0, 1fr) 120px 110px;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #141417; --surface-outer: #0B0B0D; --panel: #1F1F24; --line: #2A2A30;
+    --ink: #F4F4F5; --ink-2: #A1A1AA; --ink-muted: #8B8B94;
+    --accent: #6B9BFF; --accent-fg: #0B0B0D; --accent-soft: #18233A;
+    --stale: #F0B060; --stale-soft: #2E2414;
+  }
+}
