@@ -80,4 +80,68 @@ def test_markdown_headings_get_anchors(tmp_path):
     html = render_markdown(page)
     assert '<h2 id="action-items">Action items</h2>' in html
     # A repeated heading gets its own id, so each section stays linkable.
-    assert '<h2 id="action-items_1">Action items</h2>' in html
+    assert '<h2 id="action-items-1">Action items</h2>' in html
+
+
+def test_markdown_nests_lists_indented_by_two_or_three_spaces(tmp_path):
+    page = tmp_path / "lists.md"
+    page.write_text(
+        "- outer\n"
+        "  - two spaces\n"
+        "\n"
+        "Between the lists.\n"
+        "\n"
+        "1. first\n"
+        "   1. three spaces\n"
+        "\n"
+        "```\n"
+        "fenced\n"
+        "```\n"
+        "\n"
+        "    indented code\n",
+        encoding="utf-8",
+    )
+    html = render_markdown(page)
+    assert "<li>outer\n<ul>\n<li>two spaces</li>" in html
+    assert "<li>first\n<ol>\n<li>three spaces</li>" in html
+    # Code still renders as code.
+    assert "<pre><code>fenced\n</code></pre>" in html
+    assert "<pre><code>indented code\n</code></pre>" in html
+
+
+def test_markdown_list_starts_right_under_a_line_of_text(tmp_path):
+    # As BMad plans write it: a bold label, then a list with no blank line.
+    # And an item's own paragraph, then the next item with no blank line.
+    page = tmp_path / "plan.md"
+    page.write_text(
+        "**Approach:**\n"
+        "- one\n"
+        "\n"
+        "5. five\n"
+        "\n"
+        "   Owner: build.\n"
+        "6. six\n"
+        "   - sub\n",
+        encoding="utf-8",
+    )
+    html = render_markdown(page)
+    assert "<p><strong>Approach:</strong></p>\n<ul>\n<li>one</li>" in html
+    assert "<p>Owner: build.</p>\n</li>\n<li>\n<p>six</p>\n<ul>\n<li>sub</li>" in html
+
+
+def test_markdown_heading_ids_match_the_old_renderer(tmp_path):
+    # Python-Markdown's toc ids, so links written before the switch still land.
+    page = tmp_path / "steps.md"
+    page.write_text("## Step 1 — Clarify & route\n\n## Café `code`\n", encoding="utf-8")
+    html = render_markdown(page)
+    assert 'id="step-1-clarify-route"' in html
+    assert 'id="cafe-code"' in html
+
+
+def test_markdown_heading_without_ascii_words_gets_an_id(tmp_path):
+    page = tmp_path / "emoji.md"
+    page.write_text("## ✅\n\n## 日本語\n", encoding="utf-8")
+    html = render_markdown(page)
+    assert 'id=""' not in html
+    assert '<h2 id="section">✅</h2>' in html
+    assert '<h2 id="section-1">日本語</h2>' in html

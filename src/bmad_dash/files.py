@@ -4,10 +4,13 @@ Only `.md` (rendered to HTML) and `.html` (served as is) files are allowed,
 and only when they resolve inside `_bmad-output/`.
 """
 
+import re
+import unicodedata
 from html import escape
 from pathlib import Path
 
-import markdown
+from markdown_it import MarkdownIt
+from mdit_py_plugins.anchors import anchors_plugin
 
 ALLOWED_SUFFIXES = {".md", ".html"}
 
@@ -85,12 +88,32 @@ def not_found_page() -> str:
     return html_page("Not found", "<h1>Not found</h1>\n<p>No such file in _bmad-output/.</p>")
 
 
+def heading_id(title: str) -> str:
+    """The `id` for a heading: `Action items` -> `action-items`. Same ids as
+    Python-Markdown's `toc`, which the file view used before, so old links
+    keep working. A heading with no ASCII letters or digits (`## ✅`) gets
+    `section`, never an empty id."""
+    ascii_title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
+    words = re.sub(r"[^\w\s-]", "", ascii_title).strip().lower()
+    return re.sub(r"[-\s]+", "-", words) or "section"
+
+
+# CommonMark, as GitHub and VS Code render it: lists nest by 2 or 3 spaces
+# and can start right under a line of text. Raw HTML passes through.
+MARKDOWN = (
+    MarkdownIt("commonmark")
+    .enable("table")
+    .use(anchors_plugin, min_level=1, max_level=6, slug_func=heading_id)
+)
+
+
 def render_markdown(path: Path) -> str:
     """A full HTML page for the markdown file at `path`. Each heading gets an
     `id` (e.g. `## Action items` -> `id="action-items"`), so a link can point
-    at a section: `/file/<path>#action-items`."""
+    at a section: `/file/<path>#action-items`. A repeated heading gets
+    `action-items-1`, `action-items-2`, ..."""
     frontmatter, body = split_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
-    body_html = markdown.markdown(body, extensions=["tables", "fenced_code", "toc"])
+    body_html = MARKDOWN.render(body)
     frontmatter_html = (
         f'<pre class="frontmatter">{escape(frontmatter)}</pre>'
         if frontmatter is not None
