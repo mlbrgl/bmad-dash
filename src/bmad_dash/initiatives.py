@@ -136,8 +136,10 @@ def make_initiative(
     # The two `tickets.py` calls are independent: run them side by side.
     with ThreadPoolExecutor(max_workers=1) as pool:
         next_future = pool.submit(load_next, root, initiative_dir)
-        tickets = load_tickets(root, initiative_dir)
+        tickets_data = load_tickets(root, initiative_dir)
         next_info = next_future.result()
+    tickets = tickets_data.tickets if tickets_data else None
+    epic_order = tickets_data.epic_order if tickets_data else []
     branches = None
     if worktrees:
         own = worktrees[0].branch
@@ -152,7 +154,7 @@ def make_initiative(
         worktrees=worktrees,
         tickets=tickets,
         next_info=next_info,
-        tree=build_tree(initiative_dir, tickets, now, last_commit, next_info),
+        tree=build_tree(initiative_dir, tickets, now, last_commit, next_info, epic_order),
         top_tickets=initiative_tickets(initiative_dir, tickets, now, next_info),
         activity=last_activity(initiative_dir, worktrees, commits),
         status=fields.get("status", ""),

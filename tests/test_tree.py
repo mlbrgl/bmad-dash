@@ -452,6 +452,45 @@ def test_kinds_sorted_and_links(initiative):
     assert paths["spec-nofile"] is None
 
 
+def test_epics_follow_build_order_then_unlisted_by_name(initiative):
+    for name in ["epic-a", "epic-b", "epic-c", "epic-z", "spec-a"]:
+        make_folder(initiative, name)
+    order = ["epic-c", "epic-gone", "epic-a", "epic-c"]  # a gone and a repeated slug
+    names = [i.name for i in build_tree(initiative, [], NOW, epic_order=order)]
+    assert names == ["spec-a", "epic-c", "epic-a", "epic-b", "epic-z"]
+
+
+def test_epics_by_name_without_order(initiative):
+    for name in ["epic-b", "epic-a"]:
+        make_folder(initiative, name)
+    assert [i.name for i in build_tree(initiative, None, NOW, epic_order=[])] == ["epic-a", "epic-b"]
+
+
+def test_failing_tickets_py_lists_epics_by_name(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    initiative = root / "_bmad-output" / "initiative-x"
+    for name in ["epic-b", "epic-a"]:
+        make_folder(initiative, name)
+    write_fake_tickets_py(root, "import sys\nsys.exit(1)\n")
+    tree = only(list_initiatives(root, now=NOW)).tree
+    assert [i.name for i in tree] == ["epic-a", "epic-b"]
+
+
+def test_initiative_tree_uses_tickets_py_epic_order(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    initiative = root / "_bmad-output" / "initiative-x"
+    for name in ["epic-a", "epic-b", "epic-new"]:
+        make_folder(initiative, name)
+    data = {"tickets": [], "epics": [{"slug": "epic-b"}, {"slug": "epic-a"}]}
+    write_fake_tickets_py(root, f"print({json.dumps(json.dumps(data))})\n")
+    tree = only(list_initiatives(root, now=NOW)).tree
+    assert [i.name for i in tree] == ["epic-b", "epic-a", "epic-new"]
+
+
 # --- initiative-level tickets ---
 
 
@@ -495,7 +534,24 @@ def write_fake_tickets_py(root: Path, body: str) -> None:
 def test_load_tickets_reads_json(tmp_path, initiative):
     data = {"tickets": [ticket("1.1", "done")]}
     write_fake_tickets_py(tmp_path, f"print({json.dumps(json.dumps(data))})\n")
-    assert load_tickets(tmp_path, initiative) == data["tickets"]
+    assert load_tickets(tmp_path, initiative).tickets == data["tickets"]
+
+
+def test_load_tickets_keeps_epic_order(tmp_path, initiative):
+    data = {"tickets": [], "epics": [{"slug": "epic-b", "id": 2}, {"slug": "epic-a", "id": 1}]}
+    write_fake_tickets_py(tmp_path, f"print({json.dumps(json.dumps(data))})\n")
+    assert load_tickets(tmp_path, initiative).epic_order == ["epic-b", "epic-a"]
+
+
+@pytest.mark.parametrize("epics", [None, "epic-a", [{"slug": 1}], [{"id": 1}], ["epic-a"]])
+def test_load_tickets_missing_or_malformed_epics_is_no_order(tmp_path, initiative, epics):
+    data = {"tickets": [ticket("1.1", "done")]}
+    if epics is not None:
+        data["epics"] = epics
+    write_fake_tickets_py(tmp_path, f"print({json.dumps(json.dumps(data))})\n")
+    loaded = load_tickets(tmp_path, initiative)
+    assert loaded.tickets == data["tickets"]  # tickets still load
+    assert loaded.epic_order == []
 
 
 def test_load_tickets_script_failure_is_none(tmp_path, initiative):

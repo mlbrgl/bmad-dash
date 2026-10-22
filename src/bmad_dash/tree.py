@@ -8,6 +8,8 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
   `STALE_AFTER`, or when the initiative's last commit (the one Last activity
   uses) is strictly newer than its updated time.
 - Epic: finished when it has tickets and every non-dropped one is `done`, else open.
+  Epics list in the initiative's `tickets.toml` build order (`tickets.py status`
+  `epics`); folders not listed there follow, by name. Without it, all by name.
 - Any open item untouched for `STALE_AFTER` is stale instead. Finished is never stale.
 - Ticket: stale when not done or dropped and untouched for `STALE_AFTER`.
   A missing or null state reads as "" (`ticket_state`) and shows as `no state`.
@@ -71,8 +73,26 @@ class TreeItem:
     report_label: str = "report"
 
 
-def load_tickets(root: Path, initiative_dir: Path) -> list[dict] | None:
-    """All tickets of the initiative from `tickets.py status`, or None on any failure."""
+@dataclass
+class TicketsData:
+    """What `tickets.py status` says about an initiative."""
+    tickets: list[dict]
+    # Epic slugs in the initiative's `tickets.toml` build order;
+    # empty when `epics` is missing or malformed (then epics sort by name).
+    epic_order: list[str]
+
+
+def epic_slugs(data: dict) -> list[str]:
+    """The `slug` of each `epics` row, in order; [] on a wrong shape."""
+    rows = next_rows(data, "epics")
+    if rows is None or not all(isinstance(r.get("slug"), str) for r in rows):
+        return []
+    return [r["slug"] for r in rows]
+
+
+def load_tickets(root: Path, initiative_dir: Path) -> TicketsData | None:
+    """All tickets of the initiative and its epic order from `tickets.py status`,
+    or None on any failure."""
     script = root / "_bmad" / "method" / "scripts" / "tickets.py"
     if not script.is_file():
         return None
@@ -93,7 +113,10 @@ def load_tickets(root: Path, initiative_dir: Path) -> list[dict] | None:
     tickets = data.get("tickets")
     if not isinstance(tickets, list):
         return None
-    return [t for t in tickets if isinstance(t, dict)]
+    return TicketsData(
+        tickets=[t for t in tickets if isinstance(t, dict)],
+        epic_order=epic_slugs(data),
+    )
 
 
 def next_rows(data: dict, key: str) -> list[dict] | None:
@@ -456,17 +479,29 @@ def build_tree(
     now: datetime,
     last_commit: datetime | None = None,
     next_info: NextInfo | None = None,
+    epic_order: list[str] | None = None,
 ) -> list[TreeItem]:
     """Forges, specs, walkthroughs, then epics at initiative level; each epic
     holds its own forges, specs and walkthroughs. Link paths are relative to the
     initiative's parent (`_bmad-output/`).
 
+    Epics follow `epic_order` (slugs in build order); folders not in it come
+    after, by name. With no `epic_order`, all are by name.
+
     `last_commit` is the time of the initiative's last commit (None when there is
     no worktree or git failed); walkthroughs older than it are stale."""
     output_dir = initiative_dir.parent
+    position = {}
+    for i, slug in enumerate(epic_order or []):
+        position.setdefault(slug, i)  # a repeated slug keeps its first place
+    unlisted = len(epic_order or [])  # after every listed place
+    epic_dirs = sorted(
+        sub_dirs(initiative_dir, "epic-"),  # by name, so unlisted ones stay by name
+        key=lambda d: position.get(d.name, unlisted),
+    )
     epics = [
         epic_item(d, output_dir, tickets, now, last_commit, next_info)
-        for d in sub_dirs(initiative_dir, "epic-")
+        for d in epic_dirs
     ]
     return doc_items(initiative_dir, output_dir, now, last_commit) + epics
 
