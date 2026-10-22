@@ -164,9 +164,15 @@ def test_epic_with_no_open_ticket_takes_its_files_status(initiative, status, wor
     assert item.state == (FINISHED if status in ("done", "dropped") else OPEN)
 
 
-def test_epic_file_done_is_finished_even_with_an_open_ticket(initiative):
+def test_epic_file_done_with_an_open_ticket_stays_open(initiative):
     set_epic_status(make_folder(initiative, "epic-x"), "done")
-    item = only(build_tree(initiative, [planned("1.1", "review", "built")], NOW))
+    item = only(build_tree(initiative, [ticket("1.1", "in-progress")], NOW))
+    assert item.state == OPEN
+
+
+def test_epic_file_done_is_finished_when_every_ticket_is_closed(initiative):
+    set_epic_status(make_folder(initiative, "epic-x"), "done")
+    item = only(build_tree(initiative, [ticket("1.1", "done"), ticket("1.2", "dropped")], NOW))
     assert item.state == FINISHED
 
 

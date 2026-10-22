@@ -37,11 +37,12 @@
     });
   });
 
-  // An epic's caret folds its children. Not remembered: each load starts
-  // from the page's defaults (finished epics collapsed).
-  Array.prototype.forEach.call(document.querySelectorAll("button.fold"), function (button) {
+  // "Show n closed tickets" <-> "Hide closed tickets". Not remembered.
+  Array.prototype.forEach.call(document.querySelectorAll("button.closed-toggle"), function (button) {
     button.addEventListener("click", function () {
-      setOpen(button, !isOpen(button));
+      var open = !isOpen(button);
+      setOpen(button, open);
+      button.textContent = button.getAttribute(open ? "data-hide" : "data-show");
     });
   });
 

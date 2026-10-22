@@ -7,7 +7,8 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
 - Walkthrough: never finished, no status word. Stale when untouched for
   `STALE_AFTER`, or when the initiative's last commit (the one Last activity
   uses) is strictly newer than its updated time.
-- Epic: finished when it has tickets and every non-dropped one is `done`, else open.
+- Epic: finished when its file says `done` or `dropped` and none of its tickets
+  is open (not `done` or `dropped`), else open.
   Epics list in the initiative's `tickets.toml` build order (`tickets.py status`
   `epics`); folders not listed there follow, by name. Without it, all by name.
 - Retro: `epic-<slug>-retrospective.md` in an epic folder, first under its epic.
@@ -517,6 +518,8 @@ def epic_item(
         word = ""
     else:
         raw_tickets = [t for t in tickets if t.get("epic") == folder.name]
+        if any(ticket_state(t) not in ("done", "dropped") for t in raw_tickets):
+            state = OPEN
         word = epic_word(raw_tickets, file_status, retros[0] if retros else None,
                          newest_plan_mtime(folder))
         plans = plans_by_ticket(folder)

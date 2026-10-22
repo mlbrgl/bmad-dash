@@ -82,7 +82,7 @@ def tree_initiative(tickets: list[dict] | None = [], slug="initiative-a") -> Ini
                     tickets=[Ticket("1.1", "<i>T</i>", "in progress",
                                     "initiative-a/epic-a/story-t-plan.md",
                                     NOW - timedelta(days=20), True),
-                             Ticket("1.2", "Old", "done", None,
+                             Ticket("1.2", "Old", "backlog", None,
                                     NOW - timedelta(days=30), False)],
                     word="in progress")
     forge = TreeItem("forge", "forge-a", None, None, "stale")
@@ -143,7 +143,7 @@ def test_status_words_and_empty_doc_status():
     assert '<span role="cell"></span>' in spec
     assert '<span role="cell" class="st-muted">in progress</span>' in epic
     assert '<span role="cell" class="st-muted">in progress</span>' in pending
-    assert '<span role="cell" class="st-muted">done</span>' in done
+    assert '<span role="cell" class="st-muted">backlog</span>' in done
 
 
 def test_updated_is_relative_with_exact_title_and_stale_tag():
@@ -1067,54 +1067,69 @@ def test_plus_n_is_plain_text_without_a_panel():
     assert '<span class="st-link">+1</span>' in status_of(initiative)
 
 
-# --- epic folding ---
+# --- closed tickets behind a button ---
 
-def fold_initiative() -> Initiative:
-    def epic(name: str, state: str) -> TreeItem:
-        return TreeItem("epic", name, f"initiative-a/{name}/{name}.md", NOW, state,
-                        tickets=[Ticket("1.1", f"T of {name}", "done", None, NOW, False)])
-    return Initiative("initiative-a", "A", [], tickets=[], tree=[
-        epic("epic-done", "finished"), epic("epic-dropped", "finished"),
-        epic("epic-open", "open"),
-    ])
+def tk(ref: str, word: str) -> Ticket:
+    return Ticket(ref, f"T{ref}", word, None, NOW, False)
 
 
-def fold_buttons(html: str) -> dict[str, tuple[str, str]]:
-    """Epic slug -> (aria-expanded, aria-controls) of its caret."""
-    found = re.findall(
-        r'<button type="button" class="fold" aria-expanded="(\w+)" aria-controls="([^"]+)"'
-        r' aria-label="Show epic: ([^"]+)"', html)
-    return {slug: (expanded, controls) for expanded, controls, slug in found}
+def closed_initiative(tickets: list[Ticket], top: list[Ticket] | None = None) -> Initiative:
+    epic = TreeItem("epic", "epic-a", "initiative-a/epic-a/epic-a.md", NOW, "open",
+                    tickets=tickets)
+    initiative = Initiative("initiative-a", "A", [], tickets=[], tree=[epic])
+    initiative.top_tickets = top or []
+    return initiative
 
 
-def test_every_epic_has_a_caret_named_by_its_slug_before_its_name():
-    html = render([fold_initiative()])
-    assert set(fold_buttons(html)) == {"epic-done", "epic-dropped", "epic-open"}
-    row = [r for r in rows_of(html) if "epic-open" in r][0]
-    assert row.index("<button") < row.index('class="name-link"')
+def test_mixed_epic_hides_closed_tickets_behind_one_button():
+    html = render([closed_initiative([tk("1.1", "done"), tk("1.2", "in progress"),
+                                      tk("1.3", "dropped")])])
+    assert 'class="fold"' not in html
+    assert html.count('class="closed-toggle"') == 1
+    assert ('<button type="button" class="closed-toggle" aria-expanded="false"'
+            ' aria-controls="closed-initiative-a-epic-a"') in html
+    assert ">Show 2 closed tickets</button>" in html
+    group = html.split('id="closed-initiative-a-epic-a" hidden>')[1].split("</div></div>")[0]
+    assert "T1.1" in group and "T1.3" in group and "T1.2" not in group
+    # The open row comes first, the button row last.
+    assert html.index("T1.2") < html.index("closed-initiative-a-epic-a")
+    assert html.index("closed-initiative-a-epic-a") < html.index('class="closed-toggle"')
 
 
-def test_finished_epics_start_collapsed_and_open_ones_expanded():
-    html = render([fold_initiative()])
-    buttons = fold_buttons(html)
-    assert buttons["epic-done"][0] == "false"
-    assert buttons["epic-dropped"][0] == "false"
-    assert buttons["epic-open"][0] == "true"
-    for slug, (expanded, controls) in buttons.items():
-        hidden = " hidden" if expanded == "false" else ""
-        assert f'<div role="rowgroup" id="{controls}"{hidden}>' in html
+def test_one_closed_ticket_reads_singular():
+    html = render([closed_initiative([tk("1.1", "done")])])
+    assert ">Show 1 closed ticket</button>" in html
+    assert 'data-hide="Hide closed tickets"' in html
 
 
-def test_epic_children_sit_inside_the_group_the_caret_controls():
-    html = render([fold_initiative()])
-    controls = fold_buttons(html)["epic-open"][1]
-    group = html.split(f'id="{controls}"')[1].split("</div></div>")[0]
-    assert "T of epic-open" in group
-    assert "T of epic-done" not in group
+def test_no_button_or_group_without_closed_tickets():
+    html = render([closed_initiative([tk("1.1", "in progress"), tk("1.2", "backlog")])])
+    assert 'class="closed-toggle"' not in html
+    assert 'role="rowgroup"' not in html
 
 
-def test_epic_carets_are_not_remembered():
-    html = render([fold_initiative()])
-    assert 'class="fold"' in html and "data-slug" not in html.split('class="fold"')[1].split(">")[0]
+def test_button_sits_under_a_lone_spec_after_the_last_ticket():
+    initiative = closed_initiative([tk("1.1", "done"), tk("1.2", "planned")])
+    spec = TreeItem("spec", "spec-a", None, NOW, "finished")
+    initiative.tree[0].children = [spec, walkthrough()]
+    rows = rows_of(render([initiative]))[1:]
+    kinds = [(re.search(r'class="t-kind">(.*?)</span>', r) or [None, "button"])[1] for r in rows]
+    assert kinds == ["epic", "spec", "1.2", "1.1", "button", "walk"]
+    assert 'class="t-name d2"><button' in rows[4]
+
+
+def test_initiative_level_tickets_get_their_own_button():
+    initiative = closed_initiative([tk("1.1", "done")], top=[tk("9", "done"), tk("10", "planned")])
+    html = render([initiative])
+    assert html.count('class="closed-toggle"') == 2
+    assert 'id="closed-initiative-a" hidden>' in html
+    assert 'aria-controls="closed-initiative-a"' in html
+
+
+def test_closed_buttons_are_not_remembered_and_epics_have_no_fold_script():
+    html = render([closed_initiative([tk("1.1", "done")])])
+    button = html.split('class="closed-toggle"')[1].split(">")[0]
+    assert "data-slug" not in button
     assert 'querySelectorAll("button.toggle")' in html
-    assert 'querySelectorAll("button.fold")' in html
+    assert 'querySelectorAll("button.closed-toggle")' in html
+    assert 'button.fold' not in html
