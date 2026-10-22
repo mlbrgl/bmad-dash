@@ -307,8 +307,8 @@ def test_only_newest_activity_row_starts_open():
     new.activity = Activity(NOW - timedelta(hours=1), "", "plan")
     none = tree_initiative(slug="none")
     html = grid(render([old, new, none]))
-    assert html.count('aria-expanded="true"') == 1
-    assert html.count('aria-expanded="false"') == 2
+    assert html.count('class="toggle" aria-expanded="true"') == 1
+    assert html.count('class="toggle" aria-expanded="false"') == 2
     assert re.search(r'aria-expanded="true" aria-controls="panel-0" data-slug="new"', html)
     assert html.count(" hidden>") == 2
     assert '<div class="panel" role="cell" id="panel-0">' in html
@@ -320,13 +320,13 @@ def test_newest_row_with_a_tree_opens_when_newest_has_none():
     older = tree_initiative(slug="older")
     older.activity = Activity(NOW - timedelta(days=2), "", "plan")
     html = grid(render([empty, older]))
-    assert html.count('aria-expanded="true"') == 1
+    assert html.count('class="toggle" aria-expanded="true"') == 1
     assert 'aria-expanded="true" aria-controls="panel-1" data-slug="older"' in html
 
 
 def test_nothing_open_without_activity():
     html = grid(render([tree_initiative(slug="a"), tree_initiative(slug="b")]))
-    assert 'aria-expanded="true"' not in html
+    assert 'class="toggle" aria-expanded="true"' not in html
     assert html.count(" hidden>") == 2
 
 
@@ -585,7 +585,7 @@ def test_finished_row_never_starts_open():
     closed.status = "done"
     closed.activity = Activity(NOW, "", "plan")
     html = render([closed])
-    assert 'aria-expanded="true"' not in markup(html)
+    assert 'class="toggle" aria-expanded="true"' not in markup(html)
 
 
 def test_all_finished_says_nothing_in_progress():
@@ -1065,3 +1065,56 @@ def test_plus_n_is_plain_text_without_a_panel():
     initiative = Initiative("initiative-a", "A", [],
                             tickets=[{"state": "backlog"}, {"state": "planned"}, {"state": "stuck"}])
     assert '<span class="st-link">+1</span>' in status_of(initiative)
+
+
+# --- epic folding ---
+
+def fold_initiative() -> Initiative:
+    def epic(name: str, state: str) -> TreeItem:
+        return TreeItem("epic", name, f"initiative-a/{name}/{name}.md", NOW, state,
+                        tickets=[Ticket("1.1", f"T of {name}", "done", None, NOW, False)])
+    return Initiative("initiative-a", "A", [], tickets=[], tree=[
+        epic("epic-done", "finished"), epic("epic-dropped", "finished"),
+        epic("epic-open", "open"),
+    ])
+
+
+def fold_buttons(html: str) -> dict[str, tuple[str, str]]:
+    """Epic slug -> (aria-expanded, aria-controls) of its caret."""
+    found = re.findall(
+        r'<button type="button" class="fold" aria-expanded="(\w+)" aria-controls="([^"]+)"'
+        r' aria-label="Show epic: ([^"]+)"', html)
+    return {slug: (expanded, controls) for expanded, controls, slug in found}
+
+
+def test_every_epic_has_a_caret_named_by_its_slug_before_its_name():
+    html = render([fold_initiative()])
+    assert set(fold_buttons(html)) == {"epic-done", "epic-dropped", "epic-open"}
+    row = [r for r in rows_of(html) if "epic-open" in r][0]
+    assert row.index("<button") < row.index('class="name-link"')
+
+
+def test_finished_epics_start_collapsed_and_open_ones_expanded():
+    html = render([fold_initiative()])
+    buttons = fold_buttons(html)
+    assert buttons["epic-done"][0] == "false"
+    assert buttons["epic-dropped"][0] == "false"
+    assert buttons["epic-open"][0] == "true"
+    for slug, (expanded, controls) in buttons.items():
+        hidden = " hidden" if expanded == "false" else ""
+        assert f'<div role="rowgroup" id="{controls}"{hidden}>' in html
+
+
+def test_epic_children_sit_inside_the_group_the_caret_controls():
+    html = render([fold_initiative()])
+    controls = fold_buttons(html)["epic-open"][1]
+    group = html.split(f'id="{controls}"')[1].split("</div></div>")[0]
+    assert "T of epic-open" in group
+    assert "T of epic-done" not in group
+
+
+def test_epic_carets_are_not_remembered():
+    html = render([fold_initiative()])
+    assert 'class="fold"' in html and "data-slug" not in html.split('class="fold"')[1].split(">")[0]
+    assert 'querySelectorAll("button.toggle")' in html
+    assert 'querySelectorAll("button.fold")' in html

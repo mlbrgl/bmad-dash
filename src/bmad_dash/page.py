@@ -33,7 +33,7 @@ from bmad_dash.rules import (
     tree_shows_stale,
     word_class,
 )
-from bmad_dash.tree import STALE, Ticket, TreeItem
+from bmad_dash.tree import FINISHED, STALE, Ticket, TreeItem
 
 
 def display_path(path: Path) -> str:
@@ -75,16 +75,28 @@ def name_cell(
     depth: int,
     report: str | None = None,
     report_label: str = "report",
+    fold: str = "",
 ) -> str:
     """The name, linked to its file when there is one. Forges may add a `report`
-    link, walkthroughs an `md` link."""
+    link, walkthroughs an `md` link. `fold` is an epic's caret button."""
     if path is None:
         inner = f'<span class="name-text">{escape(name)}</span>'
     else:
         inner = file_link(path, name, "name-link")
     if report is not None:
         inner += file_link(report, report_label, "report-link")
-    return f'<span role="cell" class="t-name d{depth}">{inner}</span>'
+    return f'<span role="cell" class="t-name d{depth}">{fold}{inner}</span>'
+
+
+def fold_button(epic: TreeItem, group_id: str) -> str:
+    """An epic's caret: folds its children. Not remembered, so unlike the
+    initiative's `toggle` it carries no slug."""
+    expanded = "false" if epic.state == FINISHED else "true"
+    return (
+        f'<button type="button" class="fold" aria-expanded="{expanded}"'
+        f' aria-controls="{escape(group_id)}" aria-label="Show epic: {escape(epic.name)}">'
+        f'<span class="caret" aria-hidden="true"></span></button>'
+    )
 
 
 def word_cell(word: str, ready: bool = False, status_only: bool = False) -> str:
@@ -167,19 +179,25 @@ def item_rows(
     show_stale: bool,
     worktree: Worktree | None = None,
     epic: TreeItem | None = None,
+    fold_prefix: str = "",
 ) -> list[str]:
     """The item's row, then its children's, then its tickets'. With
-    `show_stale` off, no row gets a stale tag.
+    `show_stale` off, no row gets a stale tag. An epic's children and tickets
+    sit in a row group its caret folds; `fold_prefix` keeps the group's id
+    unique on the page.
 
     An epic with exactly one spec nests its tickets under that spec, right
     after the spec's row (before any walkthroughs).
     """
-    rows = [tree_row(
+    group_id = f"{fold_prefix}-{item.name}"
+    fold = fold_button(item, group_id) if item.kind == "epic" else ""
+    head = tree_row(
         item.kind,
-        name_cell(item.name, item.path, depth, item.report, item.report_label),
+        name_cell(item.name, item.path, depth, item.report, item.report_label, fold),
         item_cell(item, epic, worktree),
         updated_cell(item.updated, show_stale and item.state == STALE, now),
-    )]
+    )
+    rows = []
     specs = [child for child in item.children if child.kind == "spec"]
     nest_under = specs[0] if len(specs) == 1 else None
     for child in item.children:
@@ -188,7 +206,11 @@ def item_rows(
             rows += [ticket_row(t, depth + 2, now, show_stale, worktree) for t in item.tickets]
     if nest_under is None:
         rows += [ticket_row(t, depth + 1, now, show_stale, worktree) for t in item.tickets]
-    return rows
+    if not fold:
+        return [head] + rows
+    hidden = " hidden" if item.state == FINISHED else ""
+    group = f'<div role="rowgroup" id="{escape(group_id)}"{hidden}>{"".join(rows)}</div>'
+    return [head, group]
 
 
 TREE_HEADS = ["kind", "name", "status", "updated"]
@@ -209,7 +231,8 @@ def panel_content(initiative: Initiative, now: datetime) -> str:
     show_stale = tree_shows_stale(initiative)
     worktree = initiative.worktrees[0] if initiative.worktrees else None
     for item in initiative.tree:
-        rows += item_rows(item, 0, now, show_stale, worktree)
+        rows += item_rows(item, 0, now, show_stale, worktree,
+                          fold_prefix=f"fold-{initiative.slug}")
     # Initiative-level tickets come after the epics, at the top level.
     rows += [ticket_row(t, 0, now, show_stale, worktree) for t in initiative.top_tickets]
     label = escape(f"{initiative.title} contents")

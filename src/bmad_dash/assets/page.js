@@ -37,6 +37,14 @@
     });
   });
 
+  // An epic's caret folds its children. Not remembered: each load starts
+  // from the page's defaults (finished epics collapsed).
+  Array.prototype.forEach.call(document.querySelectorAll("button.fold"), function (button) {
+    button.addEventListener("click", function () {
+      setOpen(button, !isOpen(button));
+    });
+  });
+
   // `+n` in the Status sentence opens the row's tree.
   Array.prototype.forEach.call(document.querySelectorAll("[data-open-panel]"), function (more) {
     more.addEventListener("click", function () {
