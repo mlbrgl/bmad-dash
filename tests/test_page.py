@@ -1096,6 +1096,14 @@ def test_mixed_epic_hides_closed_tickets_behind_one_button():
     assert html.index("closed-initiative-a-epic-a") < html.index('class="closed-toggle"')
 
 
+def test_closed_tickets_read_their_state_as_a_grey_status():
+    html = render([closed_initiative([tk("1.1", "done"), tk("1.2", "dropped")])])
+    done = [r for r in rows_of(html) if "T1.1" in r][0]
+    dropped = [r for r in rows_of(html) if "T1.2" in r][0]
+    assert '<span role="cell" class="st-muted">done</span>' in done
+    assert '<span role="cell" class="st-muted">dropped</span>' in dropped
+
+
 def test_one_closed_ticket_reads_singular():
     html = render([closed_initiative([tk("1.1", "done")])])
     assert ">Show 1 closed ticket</button>" in html
