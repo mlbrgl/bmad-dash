@@ -28,6 +28,7 @@ from bmad_dash.rules import (
     epic_actions,
     is_stale,
     retro_actions,
+    status_class,
     status_parts,
     ticket_action,
     tree_shows_stale,
@@ -130,10 +131,7 @@ def ticket_cell(ticket: Ticket, worktree: Worktree | None) -> str:
     the ticket has one, else its word as a status (never a link)."""
     action = ticket_action(ticket) if worktree is not None else None
     if worktree is None or action is None:
-        # A status: grey unless built (green) or blocked (warm), never blue.
-        css_class = word_class(ticket.word)
-        if css_class == LINK:
-            css_class = MUTED
+        css_class = status_class(ticket.word)
         return f'<span role="cell" class="{css_class}">{escape(ticket.word)}</span>'
     css_class = WARM if action == "unblock" else LINK
     label = f"{action} {ticket.ref} {ticket.title}"

@@ -7,7 +7,7 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
 - A row is stale when its last activity is `STALE_AFTER` old or older,
   unless the initiative is finished.
 - The Status sentence lists ticket counts by word (`ticket_word`, the tree's
-  word; statuses, coloured by `count_class`, never blue), then the doc actions
+  word; statuses, coloured by `status_class`, never blue), then the doc actions
   `resume forge`, `slice spec`, `close` (`doc_actions`). At most `MAX_WAITING`
   show, then `+n`. Done and dropped are not counted. Words go in `WORD_ORDER`
   first (every `waits on ...` counts as `waiting`), then any other word in the
@@ -139,9 +139,9 @@ AUTO_PROMPT = (
 Action = tuple[str, str, str]
 
 
-def retro_path(retro: TreeItem) -> str:
-    """The retro's path as a prompt names it, relative to the worktree."""
-    return f"_bmad-output/{retro.path}"
+def output_path(path: str) -> str:
+    """A tree item's path as a prompt names it, relative to the worktree."""
+    return f"_bmad-output/{path}"
 
 
 def epic_retro(epic: TreeItem) -> TreeItem | None:
@@ -159,7 +159,7 @@ def resume_action(epic: TreeItem) -> Action:
     prompt = f"/bmad Resume work on {epic.name}"
     step = f"resume work on {epic.name}"
     if retro is not None and retro.word == "rejected" and retro.path:
-        prompt += f": address {retro_path(retro)}"
+        prompt += f": address {output_path(retro.path)}"
         step += " and address its rejected retro"
     return make_action("resume", prompt, step)
 
@@ -180,7 +180,7 @@ def epic_actions(epic: TreeItem) -> list[Action]:
         prompt = f"/bmad-ticket Close {slug}"
         retro = epic_retro(epic)
         if any(t.word == "built" for t in epic.tickets) and retro is not None and retro.path:
-            prompt += f": mark its built tickets done, per {retro_path(retro)}"
+            prompt += f": mark its built tickets done, per {output_path(retro.path)}"
         return [make_action("close", prompt, f"close {slug}")]
     return []
 
@@ -190,7 +190,7 @@ def retro_actions(retro: TreeItem, epic: TreeItem) -> list[Action]:
     if not retro.path:
         return []
     if retro.word == "open items":
-        prompt = f"/bmad-ticket Turn the action items in {retro_path(retro)} into tickets"
+        prompt = f"/bmad-ticket Turn the action items in {output_path(retro.path)} into tickets"
         return [make_action("plan items", prompt,
                             f"turn the action items of {epic.name} into tickets")]
     if retro.word == "rejected":
@@ -204,9 +204,9 @@ def count_word(word: str) -> str:
     return "waiting" if word.startswith(WAITS_ON) else word
 
 
-def count_class(word: str) -> str:
-    """The colour of a ticket count: `blocked` warm, `built` green, else grey.
-    Counts are statuses, never blue."""
+def status_class(word: str) -> str:
+    """The colour of a status: `blocked` warm, `built` green, else grey.
+    A status is never blue."""
     if word == "blocked":
         return WARM
     if word == "built":
@@ -225,7 +225,7 @@ def waiting_items(initiative: Initiative) -> list[tuple[str, str]]:
         counts[key] = counts.get(key, 0) + 1
     others = [word for word in counts if word not in WORD_ORDER]
     return [
-        (f"{counts[word]} {word}", count_class(word))
+        (f"{counts[word]} {word}", status_class(word))
         for word in WORD_ORDER + others
         if word in counts
     ]
@@ -237,7 +237,7 @@ def open_paths(items: list[TreeItem], kind: str) -> list[str]:
     paths = []
     for item in items:
         if item.kind == kind and item.state != FINISHED and item.path:
-            paths.append(f"_bmad-output/{item.path}")
+            paths.append(output_path(item.path))
         paths += open_paths(item.children, kind)
     return paths
 
