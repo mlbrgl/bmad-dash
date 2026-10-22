@@ -141,7 +141,7 @@ def test_status_words_and_empty_doc_status():
     assert '<span role="cell"></span>' in forge
     assert '<span role="cell"></span>' in spec
     assert '<span role="cell" class="st-link">in progress</span>' in epic
-    assert '<span role="cell" class="st-link">in progress</span>' in pending
+    assert '<span role="cell" class="st-muted">in progress</span>' in pending
     assert '<span role="cell" class="st-muted">done</span>' in done
 
 
@@ -455,7 +455,7 @@ def test_unknown_states_follow_backlog_in_first_appearance_order():
                {"state": "stuck"}, {"state": "done"}]
     initiative = finished_tree(signals_initiative(tickets))
     assert waiting_items(initiative) == [
-        ("1 backlog", "st-muted"), ("2 stuck", "st-link"), ("1 lost", "st-link")]
+        ("1 backlog", "st-muted"), ("2 stuck", "st-muted"), ("1 lost", "st-muted")]
 
 
 def test_null_and_missing_state_count_as_no_state():
@@ -776,3 +776,75 @@ def test_no_github_line_when_prs_known_or_empty():
     assert "Couldn't reach GitHub" not in with_prs({})
     assert "Couldn't reach GitHub" not in with_pr(pr(7, "b"))
     assert "Couldn't reach GitHub" not in render([])
+
+
+# --- ticket actions ---
+
+def ticket_action_html(word, ready=False, worktrees=True, **extra):
+    ticket = Ticket("4.2", "Ticket actions", word, None, None, False, ready, **extra)
+    item = TreeItem("epic", "epic-x", None, None, "open", tickets=[ticket], word="in progress")
+    wts = [Worktree(WT, "main")] if worktrees else []
+    html = render([Initiative("initiative-a", "A", wts, tree=[item])])
+    row = re.search(r'<span role="cell" class="t-kind">4\.2</span>(.*?)</div>', html).group(1)
+    after_name = row[row.index("</span></span>") + len("</span></span>"):]
+    return after_name[:after_name.index('<span role="cell" class="upd"')]
+
+
+FOLDER = "folder=%2Fx%2Fmy%20wt"
+
+
+def test_ready_ticket_shows_start_link():
+    html = ticket_action_html("planned", ready=True)
+    assert html == (
+        f'<span role="cell"><a class="st-link" href="claude://code/new?{FOLDER}'
+        '&amp;q=%2Fbmad-build%204.2%20Ticket%20actions" '
+        'aria-label="start 4.2 Ticket actions">start</a></span>')
+    assert ">start</a>" in ticket_action_html("backlog", ready=True)
+
+
+def test_not_ready_planned_is_a_status():
+    assert ticket_action_html("planned") == '<span role="cell" class="st-muted">planned</span>'
+
+
+def test_in_progress_and_in_review_show_resume():
+    for word in ("in progress", "in review"):
+        html = ticket_action_html(word)
+        assert ('q=%2Fbmad-build%20Resume%204.2%20Ticket%20actions" '
+                'aria-label="resume 4.2 Ticket actions">resume</a>') in html
+        assert 'class="st-link"' in html
+
+
+def test_blocked_shows_warm_unblock_with_reason():
+    html = ticket_action_html("blocked", blocked_reason="needs x")
+    assert 'class="st-warm"' in html and ">unblock</a>" in html
+    assert 'aria-label="unblock 4.2 Ticket actions"' in html
+    assert "Resume%204.2%20Ticket%20actions%3A%20blocked%3A%20needs%20x" in html
+    bare = ticket_action_html("blocked")
+    assert "Actions%22" not in bare and "blocked%3A" not in bare
+
+
+def test_no_state_shows_fix():
+    html = ticket_action_html("no state")
+    assert ">fix</a>" in html and 'class="st-link"' in html
+    assert "q=%2Fbmad-ticket%20Check%204.2%20Ticket%20actions%3A%20it%20has%20no%20state" in html
+
+
+def test_other_ticket_words_are_statuses_never_links():
+    expected = {"built": "st-built", "waits on 3.1": "st-muted", "done": "st-muted",
+                "dropped": "st-muted", "mystery": "st-muted"}
+    for word, css_class in expected.items():
+        assert ticket_action_html(word) == f'<span role="cell" class="{css_class}">{word}</span>'
+
+
+def test_no_ticket_link_without_worktree():
+    for word, ready in [("planned", True), ("in progress", False), ("blocked", False),
+                        ("no state", False)]:
+        assert "<a " not in ticket_action_html(word, ready, worktrees=False)
+
+
+def test_no_worktree_statuses_keep_built_green_blocked_warm_rest_grey():
+    expected = {"built": "st-built", "blocked": "st-warm", "planned": "st-muted",
+                "in progress": "st-muted", "no state": "st-muted"}
+    for word, css_class in expected.items():
+        html = ticket_action_html(word, ready=True, worktrees=False)
+        assert html == f'<span role="cell" class="{css_class}">{word}</span>'

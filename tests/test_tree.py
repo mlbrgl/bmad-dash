@@ -606,7 +606,7 @@ def test_null_and_missing_state_read_as_no_state_in_tree_and_status(tmp_path):
     write_fake_tickets_py(root, f"print({json.dumps(json.dumps(data))})\n")
 
     html = render_page(list_initiatives(root, now=NOW), root)
-    assert html.count('<span role="cell" class="st-link">no state</span>') == 2
+    assert html.count('<span role="cell" class="st-muted">no state</span>') == 2
     assert '<span class="st-link">2 no state</span>' in html
     assert "0/2 done" in html
 
@@ -785,6 +785,7 @@ def test_word_classes():
         assert word_class(word) == "st-muted"
     assert word_class("planned", ready=True) == "st-link"
     assert word_class("backlog") == "st-muted"
+    assert word_class("a word the rules never named") == "st-muted"
 
 
 def project_with_next(tmp_path: Path, tickets: list[dict], next_output: str, next_exit=0):
@@ -818,7 +819,8 @@ def test_page_shows_words_colours_and_waiting_count(tmp_path):
         tmp_path, tickets, next_json([{"ref": "1.2"}], blocked))
     html = render_page(list_initiatives(root, now=NOW), root)
     assert '<span role="cell" class="st-built">built</span>' in html
-    assert '<span role="cell" class="st-link">planned</span>' in html
+    # No worktree: ready `planned` is a status, grey.
+    assert '<span role="cell" class="st-muted">planned</span>' in html
     assert '<span role="cell" class="st-muted">waits on 1.2</span>' in html
     assert '<span role="cell" class="st-warm">blocked</span>' in html
     # Order: blocked, built, planned (ready: blue), waiting (grey); two shown, then +n.

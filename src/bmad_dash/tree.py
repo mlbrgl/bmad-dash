@@ -46,6 +46,8 @@ class Ticket:
     stale: bool
     # In `tickets.py next` `ready_to_start`; only planned and backlog words use it.
     ready: bool = False
+    # The plan's reason for a `blocked` ticket; the unblock prompt quotes it.
+    blocked_reason: str = ""
 
 
 @dataclass
@@ -433,6 +435,7 @@ def make_ticket(
         updated=updated,
         stale=open_ticket and updated is not None and is_old(updated, now),
         ready=next_info is not None and ref in next_info.ready,
+        blocked_reason=str(raw.get("blocked_reason") or ""),
     )
 
 

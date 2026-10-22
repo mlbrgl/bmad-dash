@@ -19,9 +19,14 @@ from bmad_dash import assets
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.prs import PullRequest
 from bmad_dash.rules import (
+    LINK,
+    MUTED,
+    WARM,
+    action_prompt,
     by_activity,
     is_stale,
     status_parts,
+    ticket_action,
     tree_shows_stale,
     word_class,
 )
@@ -104,16 +109,44 @@ def tree_row(kind: str, name: str, word: str, updated: str) -> str:
     )
 
 
-def ticket_row(ticket: Ticket, depth: int, now: datetime, show_stale: bool) -> str:
+def ticket_cell(ticket: Ticket, worktree: Worktree | None) -> str:
+    """The ticket's action as a link when the initiative has a worktree and
+    the ticket has one, else its word as a status (never a link)."""
+    action = ticket_action(ticket) if worktree is not None else None
+    if worktree is None or action is None:
+        # A status: grey unless built (green) or blocked (warm), never blue.
+        css_class = word_class(ticket.word)
+        if css_class == LINK:
+            css_class = MUTED
+        return f'<span role="cell" class="{css_class}">{escape(ticket.word)}</span>'
+    css_class = WARM if action == "unblock" else LINK
+    label = f"{action} {ticket.ref} {ticket.title}"
+    link = action_link(worktree, action_prompt(ticket, action), action, css_class, label)
+    return f'<span role="cell">{link}</span>'
+
+
+def ticket_row(
+    ticket: Ticket,
+    depth: int,
+    now: datetime,
+    show_stale: bool,
+    worktree: Worktree | None = None,
+) -> str:
     return tree_row(
         ticket.ref,
         name_cell(ticket.title, ticket.path, depth),
-        word_cell(ticket.word, ticket.ready),
+        ticket_cell(ticket, worktree),
         updated_cell(ticket.updated, show_stale and ticket.stale, now),
     )
 
 
-def item_rows(item: TreeItem, depth: int, now: datetime, show_stale: bool) -> list[str]:
+def item_rows(
+    item: TreeItem,
+    depth: int,
+    now: datetime,
+    show_stale: bool,
+    worktree: Worktree | None = None,
+) -> list[str]:
     """The item's row, then its children's, then its tickets'. With
     `show_stale` off, no row gets a stale tag.
 
@@ -129,11 +162,11 @@ def item_rows(item: TreeItem, depth: int, now: datetime, show_stale: bool) -> li
     specs = [child for child in item.children if child.kind == "spec"]
     nest_under = specs[0] if len(specs) == 1 else None
     for child in item.children:
-        rows += item_rows(child, depth + 1, now, show_stale)
+        rows += item_rows(child, depth + 1, now, show_stale, worktree)
         if child is nest_under:
-            rows += [ticket_row(t, depth + 2, now, show_stale) for t in item.tickets]
+            rows += [ticket_row(t, depth + 2, now, show_stale, worktree) for t in item.tickets]
     if nest_under is None:
-        rows += [ticket_row(t, depth + 1, now, show_stale) for t in item.tickets]
+        rows += [ticket_row(t, depth + 1, now, show_stale, worktree) for t in item.tickets]
     return rows
 
 
@@ -153,10 +186,11 @@ def panel_content(initiative: Initiative, now: datetime) -> str:
     heads = "".join(f'<span role="columnheader">{h}</span>' for h in TREE_HEADS)
     rows = [f'<div class="t-row t-head" role="row">{heads}</div>']
     show_stale = tree_shows_stale(initiative)
+    worktree = initiative.worktrees[0] if initiative.worktrees else None
     for item in initiative.tree:
-        rows += item_rows(item, 0, now, show_stale)
+        rows += item_rows(item, 0, now, show_stale, worktree)
     # Initiative-level tickets come after the epics, at the top level.
-    rows += [ticket_row(t, 0, now, show_stale) for t in initiative.top_tickets]
+    rows += [ticket_row(t, 0, now, show_stale, worktree) for t in initiative.top_tickets]
     label = escape(f"{initiative.title} contents")
     return f'{note}<div class="tree" role="table" aria-label="{label}">{"".join(rows)}</div>'
 
@@ -267,20 +301,26 @@ def status_cell(initiative: Initiative, now: datetime) -> str:
     return f'<div class="c-status" role="cell">{SEP.join(parts)}{tag}</div>'
 
 
-def resume_href(worktree: Worktree, slug: str) -> str:
+def claude_href(worktree: Worktree, prompt: str) -> str:
     """A `claude://` link that opens a new session in the worktree with the
-    BMad resume prompt prefilled. Spaces encode as %20, not `+`."""
-    query = urlencode(
-        {"folder": str(worktree.path), "q": f"/bmad Resume work on {slug}"},
-        quote_via=quote,
-    )
+    prompt prefilled. Spaces encode as %20, not `+`."""
+    query = urlencode({"folder": str(worktree.path), "q": prompt}, quote_via=quote)
     return f"claude://code/new?{query}"
 
 
+def action_link(
+    worktree: Worktree, prompt: str, text: str, css_class: str, label: str
+) -> str:
+    href = escape(claude_href(worktree, prompt))
+    return (
+        f'<a class="{css_class}" href="{href}" aria-label="{escape(label)}">'
+        f"{escape(text)}</a>"
+    )
+
+
 def resume_link(worktree: Worktree, slug: str) -> str:
-    href = escape(resume_href(worktree, slug))
-    label = escape(f"Resume work on {slug}")
-    return f'<a class="btn btn-1" href="{href}" aria-label="{label}">Resume</a>'
+    label = f"Resume work on {slug}"
+    return action_link(worktree, f"/bmad Resume work on {slug}", "Resume", "btn btn-1", label)
 
 
 # GitHub's 16px octicons, path data from @primer/octicons 19.15.0 (MIT).

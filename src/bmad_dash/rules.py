@@ -13,7 +13,7 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
   other word in the order it first appears. With nothing waiting it says
   `CONFIRM_CLOSE`.
 - Words have four colours (`word_class`): blue to act, green built, grey
-  nothing to do, warm blocked. A count takes its word's colour.
+  (the default) nothing to do, warm blocked. A count takes its word's colour.
 - A finished initiative's tree shows no stale tags.
 - The PR button shows the PR of the highest branch that has one, in the
   stack starting at the row's branch (Stack's last PR). With Graphite, the
@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 from bmad_dash.prs import PullRequest, last_pr
 from bmad_dash.tree import (
     FINISHED,
+    Ticket,
     TreeItem,
     is_old,
     ticket_counts,
@@ -74,18 +75,49 @@ def has_open(items: list[TreeItem], kind: str) -> bool:
     )
 
 
+# Words that read blue: ticket words with an action, and epic words (epics keep
+# their look until they get their own actions).
+LINK_WORDS = {"in progress", "in review", "no state", "not started", "to retro", "to close"}
+
+
 def word_class(word: str, ready: bool = False) -> str:
-    """The colour class of a status word. `ready` matters only for `planned`
-    and `backlog`: blue when ready to start, else grey. Epic words use it too."""
+    """The colour class of a status word. Grey is the default; blue for
+    `LINK_WORDS`, and for `planned` / `backlog` when `ready` to start."""
     if word == "blocked":
         return WARM
     if word == "built":
         return BUILT
-    if word in ("done", "dropped", "waiting") or word.startswith(WAITS_ON):
-        return MUTED
     if word in ("planned", "backlog"):
         return LINK if ready else MUTED
-    return LINK
+    if word in LINK_WORDS:
+        return LINK
+    return MUTED
+
+
+def ticket_action(ticket: Ticket) -> str | None:
+    """The verb a ticket's cell offers, or None when it only shows a status."""
+    if ticket.word in ("planned", "backlog"):
+        return "start" if ticket.ready else None
+    if ticket.word in ("in progress", "in review"):
+        return "resume"
+    if ticket.word == "blocked":
+        return "unblock"
+    if ticket.word == "no state":
+        return "fix"
+    return None
+
+
+def action_prompt(ticket: Ticket, action: str) -> str:
+    """The prompt a ticket's action opens a session with."""
+    name = f"{ticket.ref} {ticket.title}"
+    if action == "start":
+        return f"/bmad-build {name}"
+    if action == "fix":
+        return f"/bmad-ticket Check {name}: it has no state"
+    prompt = f"/bmad-build Resume {name}"
+    if action == "unblock" and ticket.blocked_reason:
+        prompt += f": blocked: {ticket.blocked_reason}"
+    return prompt
 
 
 def count_word(word: str) -> str:
