@@ -28,7 +28,8 @@ Expand a row to see its forges, specs, walkthroughs and epics, then any tickets
 that sit directly in the initiative folder.
 
 `/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
-relative to `_bmad-output/`. A missing path or one outside `_bmad-output/` gets
+relative to `_bmad-output/`. Rendered headings have ids, so a link can point at
+a section: `/file/<path>#action-items` for `## Action items`. A missing path or one outside `_bmad-output/` gets
 a plain 404 page. Served files
 are sandboxed, so they can't trigger VS Code.
 

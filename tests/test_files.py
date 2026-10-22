@@ -8,7 +8,7 @@ def test_markdown_resolves_and_renders(files_project):
     html = render_markdown(path)
     assert "<title>spec-x.md</title>" in html
     assert "Initiatives</a>" not in html  # no back link
-    assert "<h1>Spec heading</h1>" in html
+    assert '<h1 id="spec-heading">Spec heading</h1>' in html
     assert "<table>" in html and "<td>one</td>" in html
     assert '<code class="language-python">' in html
     # Frontmatter is a block, escaped, and not rendered as body text.
@@ -21,7 +21,7 @@ def test_markdown_resolves_and_renders(files_project):
 def test_markdown_without_frontmatter(files_project):
     html = render_markdown(resolve_file(files_project, "initiative-x/with space.md"))
     assert '<pre class="frontmatter">' not in html
-    assert "<h1>Spaced</h1>" in html
+    assert '<h1 id="spaced">Spaced</h1>' in html
 
 
 def test_html_resolves(files_project):
@@ -72,3 +72,12 @@ def test_symlink_with_other_suffix_is_not_found(files_project):
     (out / "alias.toml").symlink_to(out / "spec-x" / "spec-x.md")
     with pytest.raises(NotFound):
         resolve_file(files_project, "initiative-x/alias.toml")
+
+
+def test_markdown_headings_get_anchors(tmp_path):
+    page = tmp_path / "retro.md"
+    page.write_text("# Retro\n\n## Action items\n\n## Action items\n", encoding="utf-8")
+    html = render_markdown(page)
+    assert '<h2 id="action-items">Action items</h2>' in html
+    # A repeated heading gets its own id, so each section stays linkable.
+    assert '<h2 id="action-items_1">Action items</h2>' in html

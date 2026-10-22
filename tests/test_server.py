@@ -200,7 +200,7 @@ def test_file_html_is_served_as_is(files_server, files_project):
 def test_file_encoded_name_is_decoded(files_server):
     response, body = raw_get(files_server, "/file/initiative-x/with%20space.md")
     assert response.status == 200
-    assert b"<h1>Spaced</h1>" in body
+    assert b'<h1 id="spaced">Spaced</h1>' in body
 
 
 @pytest.mark.parametrize("path", [

@@ -86,9 +86,11 @@ def not_found_page() -> str:
 
 
 def render_markdown(path: Path) -> str:
-    """A full HTML page for the markdown file at `path`."""
+    """A full HTML page for the markdown file at `path`. Each heading gets an
+    `id` (e.g. `## Action items` -> `id="action-items"`), so a link can point
+    at a section: `/file/<path>#action-items`."""
     frontmatter, body = split_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
-    body_html = markdown.markdown(body, extensions=["tables", "fenced_code"])
+    body_html = markdown.markdown(body, extensions=["tables", "fenced_code", "toc"])
     frontmatter_html = (
         f'<pre class="frontmatter">{escape(frontmatter)}</pre>'
         if frontmatter is not None
