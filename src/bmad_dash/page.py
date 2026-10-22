@@ -84,11 +84,12 @@ def name_cell(
     return f'<span role="cell" class="t-name d{depth}">{inner}</span>'
 
 
-def word_cell(word: str, ready: bool = False) -> str:
-    """One status word, coloured by `word_class`; `ready` is a ticket's."""
+def word_cell(word: str, ready: bool = False, status_only: bool = False) -> str:
+    """One status word, coloured by `word_class`; `ready` is a ticket's.
+    `status_only` (epics, until they get actions) is always grey."""
     if not word:
         return '<span role="cell"></span>'
-    css_class = word_class(word, ready)
+    css_class = MUTED if status_only else word_class(word, ready)
     return f'<span role="cell" class="{css_class}">{escape(word)}</span>'
 
 
@@ -156,7 +157,7 @@ def item_rows(
     rows = [tree_row(
         item.kind,
         name_cell(item.name, item.path, depth, item.report, item.report_label),
-        word_cell(item.word),
+        word_cell(item.word, status_only=True),
         updated_cell(item.updated, show_stale and item.state == STALE, now),
     )]
     specs = [child for child in item.children if child.kind == "spec"]

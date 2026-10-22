@@ -131,34 +131,104 @@ def ticket(ref: str, state: str, epic: str = "epic-x") -> dict:
     return {"epic": epic, "ref": ref, "title": f"Ticket {ref}", "state": state}
 
 
-def test_epic_all_done_is_finished(initiative):
+def set_epic_status(epic: Path, status: str):
+    (epic / f"{epic.name}.md").write_text(f"---\nstatus: {status}\n---\n")
+
+
+def write_dated_retro(epic: Path, verdict: str, when: datetime):
+    retro = epic / f"{epic.name}-retrospective.md"
+    retro.write_text(f"---\nverdict: {verdict}\n---\n")
+    os.utime(retro, (when.timestamp(), when.timestamp()))
+
+
+def planned(ref: str, state: str, status: str) -> dict:
+    return {**ticket(ref, state), "status": status}
+
+
+def test_epic_all_done_reads_to_close_until_its_file_says_done(initiative):
     make_folder(initiative, "epic-x")
     tickets = [ticket("1.1", "done"), ticket("1.2", "done"), ticket("2.1", "backlog", "epic-y")]
     item = only(build_tree(initiative, tickets, NOW))
-    assert item.state == FINISHED
+    assert (item.state, item.word) == (OPEN, "to close")
     assert [t.ref for t in item.tickets] == ["1.1", "1.2"]
-    assert item.word == "done"
+
+
+@pytest.mark.parametrize("status, word", [
+    ("done", "done"), ("dropped", "dropped"), ("in-progress", "to close"), ("", "to close"),
+])
+def test_epic_with_no_open_ticket_takes_its_files_status(initiative, status, word):
+    epic = make_folder(initiative, "epic-x")
+    set_epic_status(epic, status)
+    item = only(build_tree(initiative, [ticket("1.1", "done"), ticket("1.2", "dropped")], NOW))
+    assert item.word == word
+    assert item.state == (FINISHED if status in ("done", "dropped") else OPEN)
+
+
+def test_epic_file_done_is_finished_even_with_an_open_ticket(initiative):
+    set_epic_status(make_folder(initiative, "epic-x"), "done")
+    item = only(build_tree(initiative, [planned("1.1", "review", "built")], NOW))
+    assert item.state == FINISHED
+
+
+def test_epic_file_done_is_finished_without_tickets_or_with_none_loaded(initiative):
+    set_epic_status(make_folder(initiative, "epic-x"), "done")
+    for tickets in (None, []):
+        item = only(build_tree(initiative, tickets, NOW))
+        assert (item.state, item.word) == (FINISHED, "")
 
 
 def test_epic_partly_done_skips_dropped(initiative):
     make_folder(initiative, "epic-x")
-    tickets = [ticket("1.1", "done"), ticket("1.2", "dropped"), ticket("1.3", "review")]
+    tickets = [ticket("1.1", "done"), ticket("1.2", "dropped"), planned("1.3", "review", "in-review")]
     item = only(build_tree(initiative, tickets, NOW))
     assert item.state == OPEN
     assert item.word == "in progress"
-    assert [t.word for t in item.tickets] == ["done", "dropped", "review"]
+    assert [t.word for t in item.tickets] == ["done", "dropped", "in review"]
 
 
-def test_epic_without_tickets_is_open_zero_of_zero(initiative):
+def test_epic_with_no_ticket_planned_is_not_started(initiative):
+    make_folder(initiative, "epic-x")
+    tickets = [ticket("1.1", "planned"), ticket("1.2", "backlog")]
+    assert only(build_tree(initiative, tickets, NOW)).word == "not started"
+
+
+def test_epic_with_all_tickets_built_and_no_retro_is_to_retro(initiative):
+    make_folder(initiative, "epic-x")
+    tickets = [ticket("1.1", "done"), planned("1.2", "review", "built")]
+    assert only(build_tree(initiative, tickets, NOW)).word == "to retro"
+
+
+@pytest.mark.parametrize("verdict, word", [
+    ("accepted", "to close"), ("accepted-with-open-items", "to close"),
+    ("rejected", "in progress"), ("", "in progress"),
+])
+def test_epic_with_a_current_retro_reads_by_its_verdict(initiative, verdict, word):
+    epic = make_folder(initiative, "epic-x")
+    write_plan(epic, "story-a-plan.md", "'1'", NOW - timedelta(days=2))
+    write_dated_retro(epic, verdict, NOW - timedelta(days=1))
+    item = only(build_tree(initiative, [planned("1.1", "review", "built")], NOW))
+    assert item.word == word
+
+
+def test_retro_older_than_a_plan_is_not_current(initiative):
+    epic = make_folder(initiative, "epic-x")
+    write_dated_retro(epic, "accepted", NOW - timedelta(days=2))
+    write_plan(epic, "story-a-plan.md", "'1'", NOW - timedelta(days=1))
+    item = only(build_tree(initiative, [planned("1.1", "review", "built")], NOW))
+    assert item.word == "to retro"
+
+
+def test_epic_with_an_open_ticket_still_working_is_in_progress(initiative):
+    make_folder(initiative, "epic-x")
+    tickets = [planned("1.1", "review", "built"), planned("1.2", "in-progress", "in-progress")]
+    assert only(build_tree(initiative, tickets, NOW)).word == "in progress"
+
+
+def test_epic_without_tickets_is_open_with_no_word(initiative):
     make_folder(initiative, "epic-x")
     item = only(build_tree(initiative, [], NOW))
     assert item.state == OPEN
     assert item.word == ""
-
-
-def test_epic_with_only_dropped_tickets_has_no_word(initiative):
-    make_folder(initiative, "epic-x")
-    assert only(build_tree(initiative, [ticket("1.1", "dropped")], NOW)).word == ""
 
 
 def test_open_epic_uses_file_mtime_for_staleness(initiative):

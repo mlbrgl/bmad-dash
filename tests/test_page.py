@@ -140,7 +140,7 @@ def test_status_words_and_empty_doc_status():
     forge, epic, spec, pending, done = rows
     assert '<span role="cell"></span>' in forge
     assert '<span role="cell"></span>' in spec
-    assert '<span role="cell" class="st-link">in progress</span>' in epic
+    assert '<span role="cell" class="st-muted">in progress</span>' in epic
     assert '<span role="cell" class="st-muted">in progress</span>' in pending
     assert '<span role="cell" class="st-muted">done</span>' in done
 

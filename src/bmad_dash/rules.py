@@ -75,9 +75,8 @@ def has_open(items: list[TreeItem], kind: str) -> bool:
     )
 
 
-# Words that read blue: ticket words with an action, and epic words (epics keep
-# their look until they get their own actions).
-LINK_WORDS = {"in progress", "in review", "no state", "not started", "to retro", "to close"}
+# Words that read blue: ticket words with an action.
+LINK_WORDS = {"in progress", "in review", "no state"}
 
 
 def word_class(word: str, ready: bool = False) -> str:

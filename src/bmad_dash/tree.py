@@ -13,6 +13,13 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
 - Retro: `epic-<slug>-retrospective.md` in an epic folder, first under its epic.
   Its word is its frontmatter `verdict` (`accepted`, `open items` for
   `accepted-with-open-items`, `rejected`), else none. A doc: never open, never stale.
+- Epic word, while any ticket is open (first match): `to close` (every ticket
+  finished and a current retro `accepted` or `open items`), `to retro` (every
+  ticket finished, no current retro), `not started` (no ticket has a plan),
+  else `in progress`. With none open, the epic file's `status`: `done` or
+  `dropped`, else `to close`. A retro is current when its mtime is not older
+  than the newest plan in its epic. The epic is finished only when its file
+  says `done` or `dropped`. No tickets, or tickets unavailable: no word.
 - Any open item untouched for `STALE_AFTER` is stale instead. Finished is never stale.
 - Ticket: stale when not done or dropped and untouched for `STALE_AFTER`.
   A missing or null state reads as "" (`ticket_state`) and shows as `no state`.
@@ -417,6 +424,32 @@ def retro_items(folder: Path, output_dir: Path) -> list[TreeItem]:
     )]
 
 
+def newest_plan_mtime(folder: Path) -> datetime | None:
+    times = [t for t in map(file_mtime, folder.glob("*-plan.md")) if t is not None]
+    return max(times, default=None)
+
+
+def epic_word(raw_tickets: list[dict], file_status: str, retro: TreeItem | None,
+              newest_plan: datetime | None) -> str:
+    """An epic's word from its tickets and retro while any ticket is open,
+    else from its file's `status`. "" when it has no tickets."""
+    if not raw_tickets:
+        return ""
+    if all(ticket_state(t) in ("done", "dropped") for t in raw_tickets):
+        return file_status if file_status in ("done", "dropped") else "to close"
+    if all(ticket_state(t) in ("done", "dropped") or t.get("status") == "built"
+           for t in raw_tickets):
+        current = (retro is not None and retro.updated is not None
+                   and (newest_plan is None or retro.updated >= newest_plan))
+        if current and retro.word in ("accepted", "open items"):
+            return "to close"
+        if not current:
+            return "to retro"
+    if not any(t.get("status") for t in raw_tickets):
+        return "not started"
+    return "in progress"
+
+
 def plans_by_ticket(folder: Path) -> dict[str, Path]:
     """`*-plan.md` files in `folder`, keyed by their frontmatter `ticket`."""
     plans = {}
@@ -474,19 +507,18 @@ def epic_item(
     next_info: NextInfo | None = None,
 ) -> TreeItem:
     updated = newest_mtime(folder)
-    children = retro_items(folder, output_dir) + doc_items(folder, output_dir, now, last_commit)
+    retros = retro_items(folder, output_dir)
+    children = retros + doc_items(folder, output_dir, now, last_commit)
+    file_status = frontmatter(folder / f"{folder.name}.md").get("status", "")
+    state = FINISHED if file_status in ("done", "dropped") else OPEN
 
     if tickets is None:
-        # Tickets unavailable: counts unknown, so we can't call it finished.
         epic_tickets = []
-        state = OPEN
         word = ""
     else:
         raw_tickets = [t for t in tickets if t.get("epic") == folder.name]
-        done, total = ticket_counts(raw_tickets)
-        finished = total > 0 and done == total
-        state = FINISHED if finished else OPEN
-        word = "" if total == 0 else ("done" if finished else "in progress")
+        word = epic_word(raw_tickets, file_status, retros[0] if retros else None,
+                         newest_plan_mtime(folder))
         plans = plans_by_ticket(folder)
         epic_tickets = [make_ticket(t, folder, output_dir, plans, now, next_info) for t in raw_tickets]
 
