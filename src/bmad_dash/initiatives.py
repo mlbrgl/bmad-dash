@@ -7,6 +7,7 @@ A worktree works on an initiative when its own
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Set
 from concurrent.futures import ThreadPoolExecutor
 import tomllib
 from dataclasses import dataclass, field
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from bmad_dash import commands
-from bmad_dash.rules import stack_tips
+from bmad_dash.rules import claimed_branches, stack_tips
 from bmad_dash.signals import Activity, last_activity, worktree_commits
 from bmad_dash.tree import (
     Ticket,
@@ -121,11 +122,17 @@ def make_initiative(
     worktrees: list[Worktree],
     now: datetime,
     stack: GraphiteStack | None = None,
+    claimed: Set[str] = frozenset(),
 ) -> Initiative:
     """`stack` is from `gt_stack`; with it, the last commit is the newest on
-    the stack's branches, not just the worktree's HEAD."""
+    the stack's branches, not just the worktree's HEAD. `claimed` holds the
+    branches initiatives' worktrees have checked out; the walk skips them,
+    except this initiative's own branch."""
     tickets = load_tickets(root, initiative_dir)
-    branches = stack_tips(stack, worktrees[0].branch) if worktrees else None
+    branches = None
+    if worktrees:
+        own = worktrees[0].branch
+        branches = stack_tips(stack, own, claimed - {own})
     # One git call, shared by the tree (walkthrough staleness) and Last activity.
     commits = worktree_commits(worktrees, branches)
     last_commit = max((c.when for c in commits), default=None)
@@ -181,13 +188,17 @@ def list_initiatives(
         (p for p in (root / "_bmad-output").glob("initiative-*") if p.is_dir()),
         key=lambda p: p.name,
     )
+    # Branches the rows' worktrees have checked out stop the stack walk;
+    # same set as `stack_prs` builds from these rows.
+    branches = claimed_branches(claimed[d.name] for d in initiative_dirs if d.name in claimed)
     # Each initiative runs its own `tickets.py` call, so build them in parallel:
     # the page then waits for the slowest call, not the sum of them.
     # map() keeps the slug order.
     with ThreadPoolExecutor(max_workers=8) as pool:
         return list(pool.map(
             lambda d: make_initiative(
-                root, d, [claimed[d.name]] if d.name in claimed else [], now, stack
+                root, d, [claimed[d.name]] if d.name in claimed else [], now, stack,
+                branches,
             ),
             initiative_dirs,
         ))

@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from conftest import STACK_TIMES, add_walkthrough, write_initiative
+from conftest import STACK_TIMES, add_walkthrough, git, write_config, write_initiative
 
 from bmad_dash.initiatives import Worktree, active_initiative, list_initiatives, make_initiative
 from bmad_dash.page import render_page
@@ -154,6 +154,27 @@ def test_missing_local_branch_is_skipped(stacked_project):
     stack = GraphiteStack({"main": ["feature-a"], "feature-a": ["b"], "b": ["gone"]}, {"main"})
     wt = stacked_project.parent / "worktrees" / "wt-a"
     assert make_matched(stacked_project, Worktree(wt, "feature-a"), stack).activity.text == "b work"
+
+
+def test_claimed_branch_stops_the_last_commit(stacked_project):
+    # Another initiative's worktree has b: feature-a's stack is feature-a alone.
+    wt = stacked_project.parent / "worktrees" / "wt-a"
+    folder = stacked_project / "_bmad-output" / "initiative-matched"
+    matched = make_initiative(stacked_project, folder, [Worktree(wt, "feature-a")],
+                              datetime.now(), CHAIN, {"feature-a", "b"})
+    assert matched.activity.text == "feature-a work"
+
+
+def test_list_initiatives_passes_claimed_branches(stacked_project):
+    # A worktree on b claims initiative-shared-b: initiative-matched stops at feature-a.
+    root = stacked_project
+    wt_b = root.parent / "worktrees" / "wt-on-b"
+    git(root, "worktree", "add", str(wt_b), "b")
+    write_config(wt_b, '[core]\nactive_initiative = "initiative-on-b"\n')
+    write_initiative(root, "initiative-on-b", "---\ntitle: B\n---\n")
+    found = {i.slug: i for i in list_initiatives(root, stack=CHAIN)}
+    assert found["initiative-matched"].activity.text == "feature-a work"
+    assert found["initiative-on-b"].activity.text == "c work"
 
 
 def test_trunk_keeps_its_own_commit(stacked_project):

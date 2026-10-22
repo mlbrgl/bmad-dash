@@ -3,8 +3,12 @@
 Rules in `dashboard-status-rules.md` (Stack's last PR):
 
 - In a repo Graphite tracks, `gt state` gives the stack: it starts at the
-  row's branch and follows tracked children. The button is the newest PR
-  from the top branch, found with one `gh pr list --head` call.
+  row's branch and follows tracked children. A branch another initiative's
+  worktree has checked out is not a child, so two initiatives on one stack
+  each get their own part of it.
+- Every branch of every stack gets one `gh pr list --head` call, all in one
+  parallel batch. The button is the newest PR from the highest branch that
+  has one.
 - `gt` only runs when `<git common dir>/.graphite_repo_config` exists. In an
   untracked repo `gt state` sets Graphite up and writes into `.git`.
 - Without `gt`, or in an untracked repo, the user's PRs are walked instead.
@@ -21,7 +25,7 @@ from pathlib import Path
 from bmad_dash import commands
 from bmad_dash.initiatives import Initiative
 from bmad_dash.prs import PullRequest, fetch_branch_pr, has_github_remote, list_my_prs
-from bmad_dash.rules import row_pr, stack_branches
+from bmad_dash.rules import claimed_branches, highest_pr, row_pr, stack_branches
 
 GT_TIMEOUT = 10  # seconds
 GT_CONFIG = ".graphite_repo_config"
@@ -96,11 +100,14 @@ def stack_prs(
     button. None when GitHub couldn't be reached."""
     if topology is None:
         return None
+    # Branches other initiatives' worktrees have checked out: not children.
+    # Each row's own branch is subtracted in the rules.
+    claimed = claimed_branches(i.worktrees[0] for i in initiatives if i.worktrees)
     if isinstance(topology, list):  # fallback walk over the user's PRs
-        found = {i.slug: row_pr(i, topology) for i in initiatives}
+        found = {i.slug: row_pr(i, topology, claimed) for i in initiatives}
         return {slug: pr for slug, pr in found.items() if pr is not None}
 
-    tops: dict[str, str] = {}  # slug -> top branch
+    stacks: dict[str, list[str]] = {}  # slug -> [branch, ..., top]
     for initiative in initiatives:
         if not initiative.worktrees:
             continue
@@ -108,17 +115,18 @@ def stack_prs(
         # On trunk (e.g. main) there is no stack of the row's own: no button.
         if branch == "detached" or branch in topology.trunks:
             continue
-        stack = stack_branches(topology.children, branch)
+        stack = stack_branches(topology.children, branch, claimed)
         if stack is not None:  # None: fork
-            tops[initiative.slug] = stack[-1]
-    if not tops:
+            stacks[initiative.slug] = stack
+    if not stacks:
         return {}
 
-    # One gh call per distinct top, run in parallel, so a slow GitHub costs
-    # about one timeout, not one per row.
-    branches = sorted(set(tops.values()))
+    # One gh call per distinct branch of all stacks, up to MAX_LOOKUPS (8) at
+    # once, so a slow GitHub costs about one timeout per 8 branches.
+    branches = sorted({b for stack in stacks.values() for b in stack})
     with ThreadPoolExecutor(max_workers=min(len(branches), MAX_LOOKUPS)) as pool:
         results = dict(zip(branches, pool.map(lambda b: fetch_branch_pr(root, b), branches)))
     if any(result is None for result in results.values()):
         return None
-    return {slug: results[top][0] for slug, top in tops.items() if results[top]}
+    found = {slug: highest_pr(stack, results) for slug, stack in stacks.items()}
+    return {slug: pr for slug, pr in found.items() if pr is not None}

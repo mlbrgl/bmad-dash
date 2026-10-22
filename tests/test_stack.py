@@ -168,13 +168,13 @@ def test_gt_failures_give_none(fake, gt):
 
 # --- stack_prs, gt path (one test per matrix row) ---
 
-def test_three_branch_stack_shows_top_pr(fake):
+def test_three_branch_stack_looks_up_every_branch_and_shows_highest_pr(fake):
     f = fake(by_head={"c": [pr_json(31, "c", base="b")]})
     assert shown([row("a")]) == {"initiative-a": 31}
-    assert f.ran("gh") == [[
-        "gh", "pr", "list", "--head", "c", "--state", "all", "--limit", "1",
+    assert sorted(f.ran("gh")) == [[
+        "gh", "pr", "list", "--head", head, "--state", "all", "--limit", "1",
         "--json", "number,headRefName,baseRefName,state,isDraft,url",
-    ]]
+    ] for head in ["a", "b", "c"]]
 
 
 def test_middle_of_stack_shows_top_pr(fake):
@@ -209,9 +209,15 @@ def test_untracked_branch_is_its_own_top(fake):
     assert [args[4] for args in f.ran("gh")] == ["lone"]
 
 
-def test_no_pr_for_top_is_no_button_not_a_failure(fake):
-    fake(by_head={})
+def test_top_without_pr_shows_the_highest_branch_with_one(fake):
+    fake(by_head={"a": [pr_json(7, "a")], "b": [pr_json(8, "b", base="a")]})
+    assert shown([row("a")]) == {"initiative-a": 8}
+
+
+def test_no_pr_on_any_branch_is_no_button_not_a_failure(fake):
+    f = fake(by_head={})
     assert shown([row("a")]) == {}
+    assert sorted(args[4] for args in f.ran("gh")) == ["a", "b", "c"]
 
 
 @pytest.mark.parametrize("error", [
@@ -236,11 +242,35 @@ def test_one_failed_lookup_fails_the_whole_root(fake, monkeypatch):
     assert shown([row("a"), row("lone", slug="initiative-b")]) is None
 
 
-def test_rows_on_one_stack_share_one_lookup(fake):
-    f = fake(by_head={"c": [pr_json(31, "c")]})
+def test_rows_on_one_stack_each_get_their_own_pr(fake):
+    # A on a, B on b: b is claimed, so A's stack is just a.
+    f = fake(gt=gt_state([("a", "main"), ("b", "a")]),
+             by_head={"a": [pr_json(7, "a")], "b": [pr_json(8, "b", base="a")]})
     rows = [row("a"), row("b", slug="initiative-b")]
-    assert shown(rows) == {"initiative-a": 31, "initiative-b": 31}
-    assert len(f.ran("gh")) == 1
+    assert shown(rows) == {"initiative-a": 7, "initiative-b": 8}
+    # Each distinct branch looked up once.
+    assert sorted(args[4] for args in f.ran("gh")) == ["a", "b"]
+
+
+def test_claimed_child_beside_a_free_one_is_a_stop_not_a_fork(fake):
+    gt = gt_state([("a", "main"), ("b", "a"), ("c", "a")])
+    rows = [row("a"), row("b", slug="initiative-b")]
+    fake(gt=gt, by_head={"a": [pr_json(7, "a")], "b": [pr_json(8, "b", base="a")],
+                         "c": [pr_json(9, "c", base="a")]})
+    assert shown(rows) == {"initiative-a": 9, "initiative-b": 8}
+
+
+def test_claimed_child_beside_a_free_one_without_pr_falls_back_to_own(fake):
+    gt = gt_state([("a", "main"), ("b", "a"), ("c", "a")])
+    rows = [row("a"), row("b", slug="initiative-b")]
+    fake(gt=gt, by_head={"a": [pr_json(7, "a")], "b": [pr_json(8, "b", base="a")]})
+    assert shown(rows) == {"initiative-a": 7, "initiative-b": 8}
+
+
+def test_without_claims_a_fork_is_still_a_fork(fake):
+    f = fake(gt=gt_state([("a", "main"), ("b", "a"), ("c", "a")]))
+    assert shown([row("a")]) == {}
+    assert f.ran("gh") == []
 
 
 @pytest.mark.parametrize("gt", [
@@ -293,6 +323,13 @@ def test_fallback_gh_failure_gives_none(fake, setup):
     assert shown([row("a")]) is None
 
 
+@pytest.mark.parametrize("setup", FALLBACKS)
+def test_fallback_shared_stack_each_row_its_own_pr(fake, setup):
+    fake(mine=[pr_json(7, "a"), pr_json(8, "b", base="a")], **setup)
+    rows = [row("a"), row("b", slug="initiative-b")]
+    assert shown(rows) == {"initiative-a": 7, "initiative-b": 8}
+
+
 def test_no_github_remote_runs_no_gh(fake):
     f = fake(remote="origin\tgit@gitlab.com:o/r.git (fetch)\n")
     assert shown([row("a")]) == {}
@@ -315,6 +352,17 @@ CHAIN = GraphiteStack({"main": ["a"], "a": ["b"], "b": ["c"]}, {"main"})
 def test_walk_goes_to_the_top():
     assert walked_branches(CHAIN.children, "a") == ["a", "b", "c"]
     assert walked_branches(CHAIN.children, "b") == ["b", "c"]
+
+
+def test_claimed_branches_are_not_children():
+    forked = {"main": ["a"], "a": ["b", "c"], "c": ["d"]}
+    assert walked_branches(CHAIN.children, "a", {"b"}) == ["a"]
+    assert walked_branches(forked, "a", {"b"}) == ["a", "c", "d"]
+    assert stack_branches(forked, "a", {"b"}) == ["a", "c", "d"]
+    assert stack_branches(forked, "a") is None
+    # A row's own branch is never claimed against itself.
+    assert walked_branches(CHAIN.children, "b", {"b"}) == ["b", "c"]
+    assert stack_tips(CHAIN, "a", {"b"}) == ["a"]
 
 
 def test_walk_stops_at_a_fork_and_a_cycle():

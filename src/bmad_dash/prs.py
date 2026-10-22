@@ -2,6 +2,7 @@
 and the last PR of a branch's stack."""
 
 import json
+from collections.abc import Set
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,22 +81,28 @@ def fetch_branch_pr(root: Path, branch: str) -> list[PullRequest] | None:
     return parse_prs(commands.run(branch_pr_command(branch), root, GH_TIMEOUT))
 
 
-def last_pr(prs: list[PullRequest], branch: str) -> PullRequest | None:
+def last_pr(
+    prs: list[PullRequest], branch: str, claimed: Set[str] = frozenset()
+) -> PullRequest | None:
     """The topmost PR of the stack that starts at `branch`, or None.
 
     Start at the PR from `branch` (highest number if several). Then follow the
     PR based on the current PR's head, until none is. Two PRs from different
     heads based on the same branch is a fork: None. PRs in any state count.
+    PRs from `claimed` heads (other initiatives' worktrees) are skipped before
+    counting, so they stop the walk rather than fork it.
     """
     def newest_from(head: str) -> PullRequest | None:
         matches = [pr for pr in prs if pr.head == head]
         return max(matches, key=lambda pr: pr.number) if matches else None
 
+    claimed = claimed - {branch}
     current = newest_from(branch)
     visited = set()
     while current is not None:
         visited.add(current.head)
-        next_heads = {pr.head for pr in prs if pr.base == current.head}
+        next_heads = {pr.head for pr in prs
+                      if pr.base == current.head and pr.head not in claimed}
         if not next_heads:
             return current
         if len(next_heads) > 1:

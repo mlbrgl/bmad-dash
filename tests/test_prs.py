@@ -69,6 +69,18 @@ def test_no_pr_for_branch():
     assert last_pr([], "b") is None
 
 
+def test_claimed_head_stops_the_walk():
+    prs = [pr(7, "a"), pr(8, "b", base="a"), pr(9, "c", base="b")]
+    assert last_pr(prs, "a", {"b"}).number == 7
+    assert last_pr(prs, "b", {"b"}).number == 9  # own branch never claimed
+
+
+def test_claimed_head_beside_a_free_one_is_not_a_fork():
+    prs = [pr(7, "a"), pr(8, "b", base="a"), pr(9, "c", base="a")]
+    assert last_pr(prs, "a") is None
+    assert last_pr(prs, "a", {"b"}).number == 9
+
+
 def test_cycle_gives_none():
     prs = [pr(7, "b", base="c"), pr(8, "c", base="b")]
     assert last_pr(prs, "b") is None

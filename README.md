@@ -53,12 +53,16 @@ gives whose config names it. Click the caret to show a row's tree.
 - **#n** opens, in a new tab, the last PR of the stack that starts at the
   worktree's branch. It needs `gh` installed and signed in. In a repo
   Graphite tracks, `gt state` gives the stack (the branch, then its tracked
-  children), and one `gh pr list --head <top branch>` per stack finds the
-  newest PR from the top, by anyone. Without `gt`, or when the repo isn't
+  children), and one `gh pr list --head <branch>` per branch of the stack,
+  up to 8 at once, finds each branch's newest PR, by anyone. The button shows
+  the highest branch that has a PR. Without `gt`, or when the repo isn't
   tracked or `gt` fails, it falls back to one
   `gh pr list --author @me --state all --limit 100` per page load and follows
-  PRs based on each other's branch. No button for a fork in the stack, no PR,
-  a detached worktree, or a row on trunk. If `gh` fails, the header says
+  PRs based on each other's branch. Either way, a branch another
+  initiative's worktree has checked out stops the stack, so two initiatives
+  on one stack each get their own button and Last activity. No button for a
+  fork in the stack, no PR on any branch, a detached worktree, or a row on
+  trunk. If `gh` fails, the header says
   "Couldn't reach GitHub". Repos without a `github.com` remote skip it
   silently.
 
