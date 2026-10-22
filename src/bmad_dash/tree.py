@@ -10,6 +10,7 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
 - Epic: finished when it has tickets and every non-dropped one is `done`, else open.
 - Any open item untouched for `STALE_AFTER` is stale instead. Finished is never stale.
 - Ticket: stale when not done or dropped and untouched for `STALE_AFTER`.
+  A missing or null state reads as "" (`ticket_state`) and shows as `no state`.
 - Ticket counts: done/total, dropped tickets counted in neither.
 - Initiative-level tickets (those `tickets.py` lists with the initiative folder
   as their `epic`) show after the epics, at the initiative level.
@@ -149,12 +150,17 @@ def is_old(updated: datetime, now: datetime) -> bool:
     return now - updated >= STALE_AFTER
 
 
+def ticket_state(raw: dict) -> str:
+    """A `tickets.py` row's state; missing or null reads as ""."""
+    return str(raw.get("state") or "")
+
+
 def ticket_counts(tickets: list[dict] | None) -> tuple[int, int] | None:
     """(done, total) with dropped tickets in neither; None when tickets are unavailable."""
     if tickets is None:
         return None
-    counted = [t for t in tickets if t.get("state") != "dropped"]
-    done = sum(1 for t in counted if t.get("state") == "done")
+    counted = [t for t in tickets if ticket_state(t) != "dropped"]
+    done = sum(1 for t in counted if ticket_state(t) == "done")
     return done, len(counted)
 
 
@@ -262,8 +268,8 @@ def plans_by_ticket(folder: Path) -> dict[str, Path]:
 
 
 def status_word(state: str) -> str:
-    """`in-progress` -> `in progress`; other states as they are."""
-    return state.replace("-", " ")
+    """`in-progress` -> `in progress`, "" -> `no state`; other states as they are."""
+    return state.replace("-", " ") if state else "no state"
 
 
 def make_ticket(
@@ -284,7 +290,7 @@ def make_ticket(
     file = plan or (leaf if leaf is not None and leaf.is_file() else None)
     updated = file_mtime(file) if file else file_mtime(folder / "tickets.toml")
 
-    state = str(raw.get("state", ""))
+    state = ticket_state(raw)
     open_ticket = state not in ("done", "dropped")
     return Ticket(
         ref=str(raw.get("ref") or ""),

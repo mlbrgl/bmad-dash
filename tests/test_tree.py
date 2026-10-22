@@ -534,6 +534,22 @@ def test_failing_tickets_py_shows_unavailable_on_page(tmp_path):
     assert "tickets unavailable" in html
 
 
+def test_null_and_missing_state_read_as_no_state_in_tree_and_status(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    initiative = root / "_bmad-output" / "initiative-x"
+    make_folder(initiative, "epic-x")
+    no_state = {"epic": "epic-x", "ref": "1.2", "title": "Ticket 1.2"}
+    data = {"tickets": [{**ticket("1.1", "done"), "state": None}, no_state]}
+    write_fake_tickets_py(root, f"print({json.dumps(json.dumps(data))})\n")
+
+    html = render_page(list_initiatives(root, now=NOW), root)
+    assert html.count('<span role="cell" class="st-pending">no state</span>') == 2
+    assert '<span class="wait">2 no state</span>' in html
+    assert "0/2 done" in html
+
+
 # --- frontmatter edge cases (shared `split_frontmatter`) ---
 
 

@@ -31,7 +31,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from bmad_dash.prs import PullRequest, last_pr
-from bmad_dash.tree import FINISHED, TreeItem, is_old, status_word, ticket_counts
+from bmad_dash.tree import (
+    FINISHED,
+    TreeItem,
+    is_old,
+    status_word,
+    ticket_counts,
+    ticket_state,
+)
 
 if TYPE_CHECKING:  # types only: initiatives.py imports this module
     from bmad_dash.initiatives import Initiative, Worktree
@@ -61,10 +68,10 @@ def has_open(items: list[TreeItem], kind: str) -> bool:
 
 def open_states(tickets: list[dict]) -> list[str]:
     """`WAITING_STATES`, then the other states except `done` and `dropped`,
-    in the order they first appear. A missing state reads as ""."""
+    in the order they first appear. A missing or null state reads as ""."""
     states = list(WAITING_STATES)
     for ticket in tickets:
-        state = str(ticket.get("state") or "")
+        state = ticket_state(ticket)
         if state not in states and state not in ("done", "dropped"):
             states.append(state)
     return states
@@ -74,12 +81,9 @@ def waiting_items(initiative: Initiative) -> list[str]:
     """Ticket counts by status word, then doc cues."""
     items = []
     for state in open_states(initiative.tickets):
-        count = sum(
-            1 for t in initiative.tickets if str(t.get("state") or "") == state
-        )
+        count = sum(1 for t in initiative.tickets if ticket_state(t) == state)
         if count:
-            word = status_word(state) if state else "no state"
-            items.append(f"{count} {word}")
+            items.append(f"{count} {status_word(state)}")
     if has_open(initiative.tree, "forge"):
         items.append("forge open")
     if has_open(initiative.tree, "spec"):

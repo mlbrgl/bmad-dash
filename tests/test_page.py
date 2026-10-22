@@ -455,6 +455,12 @@ def test_unknown_states_follow_backlog_in_first_appearance_order():
     assert waiting_items(initiative) == ["1 backlog", "2 waiting", "1 blocked"]
 
 
+def test_null_and_missing_state_count_as_no_state():
+    tickets = [{"state": None}, {}, {"state": "backlog"}]
+    initiative = finished_tree(signals_initiative(tickets))
+    assert waiting_items(initiative) == ["1 backlog", "2 no state"]
+
+
 def test_no_confirm_cue_when_tickets_unavailable():
     html = render([finished_tree(signals_initiative(None))])
     assert "confirm close" not in html
