@@ -424,6 +424,56 @@ def test_walkthrough_at_epic_level_after_forges_and_specs(initiative):
     assert children[2].path == "initiative-x/epic-x/walkthrough-b/walkthrough-b.html"
 
 
+def write_retro(epic: Path, verdict: str | None) -> Path:
+    file = epic / f"{epic.name}-retrospective.md"
+    front = f"verdict: {verdict}\n" if verdict is not None else ""
+    file.write_text(f"---\nepic: {epic.name}\n{front}---\n\n# Retro\n")
+    return file
+
+
+@pytest.mark.parametrize(
+    "verdict, word",
+    [
+        ("accepted", "accepted"),
+        ("accepted-with-open-items", "open items"),
+        ("rejected", "rejected"),
+        (None, ""),
+        ("maybe", ""),
+    ],
+)
+def test_retro_row_first_under_its_epic_with_its_verdict(initiative, verdict, word):
+    epic = make_folder(initiative, "epic-x")
+    make_folder(epic, "forge-a", f"updated: {ago(1)}\n")
+    write_retro(epic, verdict)
+    children = only(build_tree(initiative, [], NOW)).children
+    assert [c.name for c in children] == ["epic-x-retrospective", "forge-a"]
+    retro = children[0]
+    assert retro.kind == "retro"
+    assert retro.word == word
+    assert retro.path == "initiative-x/epic-x/epic-x-retrospective.md"
+    assert retro.state == FINISHED
+
+
+def test_retro_is_never_stale(initiative):
+    epic = make_folder(initiative, "epic-x")
+    file = write_retro(epic, "accepted")
+    old = (NOW - timedelta(days=60)).timestamp()
+    os.utime(file, (old, old))
+    retro = only(only(build_tree(initiative, [], NOW)).children)
+    assert retro.state == FINISHED
+    assert retro.updated == NOW - timedelta(days=60)
+
+
+def test_epic_without_retro_has_no_retro_row(initiative):
+    make_folder(initiative, "epic-x")
+    assert only(build_tree(initiative, [], NOW)).children == []
+
+
+@pytest.mark.parametrize("word", ["accepted", "open items", "rejected"])
+def test_retro_verdicts_read_grey(word):
+    assert word_class(word) == word_class("anything else")
+
+
 def test_read_memlog_ignores_bullets(tmp_path):
     (tmp_path / ".memlog.md").write_text("---\ntopic: x\n---\nstatus: complete\n")
     assert read_memlog(tmp_path) == (None, None)

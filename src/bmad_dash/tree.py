@@ -10,6 +10,9 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
 - Epic: finished when it has tickets and every non-dropped one is `done`, else open.
   Epics list in the initiative's `tickets.toml` build order (`tickets.py status`
   `epics`); folders not listed there follow, by name. Without it, all by name.
+- Retro: `epic-<slug>-retrospective.md` in an epic folder, first under its epic.
+  Its word is its frontmatter `verdict` (`accepted`, `open items` for
+  `accepted-with-open-items`, `rejected`), else none. A doc: never open, never stale.
 - Any open item untouched for `STALE_AFTER` is stale instead. Finished is never stale.
 - Ticket: stale when not done or dropped and untouched for `STALE_AFTER`.
   A missing or null state reads as "" (`ticket_state`) and shows as `no state`.
@@ -59,7 +62,7 @@ class NextInfo:
 
 @dataclass
 class TreeItem:
-    kind: str  # "forge", "spec", "walk" (walkthrough) or "epic"
+    kind: str  # "forge", "spec", "walk" (walkthrough), "retro" or "epic"
     name: str  # folder name
     path: str | None  # link path relative to `_bmad-output/`, or None if no main file
     updated: datetime | None
@@ -67,7 +70,7 @@ class TreeItem:
     children: list["TreeItem"] = field(default_factory=list)
     tickets: list[Ticket] = field(default_factory=list)  # epics only
     # Epics: "done", "in progress", or "" when no counted tickets.
-    # Walkthroughs: always "".
+    # Retros: their verdict, or "". Walkthroughs: always "".
     word: str = ""
     # Extra link beside the name: a forge's `forge-report.html`, or a
     # walkthrough's `.md` narrative when its name links to the `.html` page.
@@ -391,6 +394,29 @@ def doc_items(
     )
 
 
+RETRO_VERDICTS = {
+    "accepted": "accepted",
+    "accepted-with-open-items": "open items",
+    "rejected": "rejected",
+}
+
+
+def retro_items(folder: Path, output_dir: Path) -> list[TreeItem]:
+    """The epic folder's `epic-<slug>-retrospective.md` as a retro row, or []."""
+    file = folder / f"{folder.name}-retrospective.md"
+    if not file.is_file():
+        return []
+    verdict = frontmatter(file).get("verdict", "")
+    return [TreeItem(
+        kind="retro",
+        name=file.stem,
+        path=file.relative_to(output_dir).as_posix(),
+        updated=file_mtime(file),
+        state=FINISHED,  # a doc: never open, so never stale
+        word=RETRO_VERDICTS.get(verdict, ""),
+    )]
+
+
 def plans_by_ticket(folder: Path) -> dict[str, Path]:
     """`*-plan.md` files in `folder`, keyed by their frontmatter `ticket`."""
     plans = {}
@@ -448,7 +474,7 @@ def epic_item(
     next_info: NextInfo | None = None,
 ) -> TreeItem:
     updated = newest_mtime(folder)
-    children = doc_items(folder, output_dir, now, last_commit)
+    children = retro_items(folder, output_dir) + doc_items(folder, output_dir, now, last_commit)
 
     if tickets is None:
         # Tickets unavailable: counts unknown, so we can't call it finished.

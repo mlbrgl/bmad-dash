@@ -209,6 +209,19 @@ def test_walkthrough_md_link_and_no_status_word():
     assert '<span role="cell" class="t-kind">walk</span>' in row
 
 
+def test_retro_row_shows_its_verdict_in_grey_and_no_state_when_none():
+    for word, cell in [("open items", '<span role="cell" class="st-muted">open items</span>'),
+                       ("", '<span role="cell"></span>')]:
+        initiative = tree_initiative()
+        initiative.tree.insert(1, TreeItem(
+            "retro", "epic-a-retrospective", "initiative-a/epic-a/epic-a-retrospective.md",
+            NOW - timedelta(days=1), "finished", word=word))
+        row = rows_of(render([initiative]))[2]
+        assert '<span role="cell" class="t-kind">retro</span>' in row
+        assert 'href="/file/initiative-a/epic-a/epic-a-retrospective.md">epic-a-retrospective</a>' in row
+        assert cell in row
+
+
 def test_stale_walkthrough_shows_stale_tag():
     initiative = tree_initiative()
     initiative.tree.insert(1, walkthrough("stale"))
