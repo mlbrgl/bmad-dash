@@ -446,7 +446,7 @@ def test_git_failure_is_500(opener, walk_project, monkeypatch):
     server, opened = opener
     path = a_py(walk_project)
     monkeypatch.setattr(
-        commands.subprocess, "run",
+        commands, "run_process",
         lambda args, **kwargs: subprocess.CompletedProcess(args, 128, "", "fatal"),
     )
     status, response = post_open(server, wt_file=path)

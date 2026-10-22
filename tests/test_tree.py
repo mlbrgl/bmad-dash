@@ -517,7 +517,7 @@ def test_load_tickets_hang_is_none(tmp_path, initiative, monkeypatch):
         calls.append(kwargs["timeout"])
         raise subprocess.TimeoutExpired(args, kwargs["timeout"])
 
-    monkeypatch.setattr(commands.subprocess, "run", hang)
+    monkeypatch.setattr(commands, "run_process", hang)
     assert load_tickets(tmp_path, initiative) is None
     assert calls == [commands.TICKETS_TIMEOUT]
 

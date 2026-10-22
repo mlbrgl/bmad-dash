@@ -31,7 +31,7 @@ def pr_json(number, head, base="main", state="OPEN"):
 
 
 class Fake:
-    """Stands in for `subprocess.run`. Records every command in `calls`.
+    """Stands in for `commands.run_process`. Records every command in `calls`.
 
     - `tracked`: whether `.graphite_repo_config` exists in the common dir
     - `gt`: `gt state` stdout, or an exception to raise
@@ -84,7 +84,7 @@ class Fake:
 def fake(tmp_path, monkeypatch):
     def make(**kwargs):
         fake = Fake(tmp_path, **kwargs)
-        monkeypatch.setattr(commands_module.subprocess, "run", fake)
+        monkeypatch.setattr(commands_module, "run_process", fake)
         return fake
     return make
 
@@ -130,7 +130,7 @@ def test_cycle_gives_none():
 def test_relative_common_dir_resolves_against_root(tmp_path, monkeypatch):
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / ".graphite_repo_config").write_text("{}")
-    monkeypatch.setattr(commands_module.subprocess, "run",
+    monkeypatch.setattr(commands_module, "run_process",
                         lambda args, **kw: subprocess.CompletedProcess(args, 0, ".git\n", ""))
     assert gt_tracked(tmp_path)
     assert not gt_tracked(tmp_path / "elsewhere")
@@ -238,7 +238,7 @@ def test_one_failed_lookup_fails_the_whole_root(fake, monkeypatch):
             return subprocess.CompletedProcess(args, 1, "", "boom")
         return real(args, **kwargs)
 
-    monkeypatch.setattr(commands_module.subprocess, "run", run)
+    monkeypatch.setattr(commands_module, "run_process", run)
     assert shown([row("a"), row("lone", slug="initiative-b")]) is None
 
 

@@ -191,7 +191,7 @@ def test_git_log_failure_gives_no_commit(tmp_path, monkeypatch, failure):
             raise failure
         return failure
 
-    monkeypatch.setattr(commands.subprocess, "run", run)
+    monkeypatch.setattr(commands, "run_process", run)
     assert last_commit(repo) is None
 
 

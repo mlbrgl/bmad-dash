@@ -75,7 +75,7 @@ def fake_github(monkeypatch, calls, gh):
             return subprocess.CompletedProcess(args, code, stdout, "")
         return real_run(args, **kwargs)
 
-    monkeypatch.setattr(commands_module.subprocess, "run", run)
+    monkeypatch.setattr(commands_module, "run_process", run)
 
 
 def get_page(srv):
@@ -368,7 +368,7 @@ def fake_gt(monkeypatch, calls, gt):
             raise AssertionError("gh must not run without a GitHub remote")
         return real_run(args, **kwargs)
 
-    monkeypatch.setattr(commands_module.subprocess, "run", run)
+    monkeypatch.setattr(commands_module, "run_process", run)
 
 
 def test_stack_newest_commit_reaches_last_activity_and_walkthrough(

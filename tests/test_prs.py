@@ -102,7 +102,7 @@ REMOTE = "origin\tgit@github.com:o/r.git (fetch)\norigin\tgit@github.com:o/r.git
 
 
 def fake_run(calls, remote=REMOTE, gh=None):
-    """A `subprocess.run` stand-in. `gh` is a CompletedProcess or an exception."""
+    """A `commands.run_process` stand-in. `gh` is a CompletedProcess or an exception."""
     def run(args, **kwargs):
         calls.append((args, kwargs))
         if args[:2] == ["git", "remote"]:
@@ -119,7 +119,7 @@ def done(stdout="", code=0):
 
 def test_fetch_parses_prs_and_states(monkeypatch):
     calls = []
-    monkeypatch.setattr(commands_module.subprocess, "run", fake_run(calls, gh=done(GH_JSON)))
+    monkeypatch.setattr(commands_module, "run_process", fake_run(calls, gh=done(GH_JSON)))
     result = load_topology(Path("/root"), None)
     assert [(p.number, p.head, p.base, p.state) for p in result] == [
         (7, "b", "main", "open"), (8, "c", "b", "draft"),
@@ -134,7 +134,7 @@ def test_fetch_parses_prs_and_states(monkeypatch):
 
 def test_no_github_remote_is_empty_and_runs_no_gh(monkeypatch):
     calls = []
-    monkeypatch.setattr(commands_module.subprocess, "run",
+    monkeypatch.setattr(commands_module, "run_process",
                         fake_run(calls, remote="origin\tgit@gitlab.com:o/r.git (fetch)\n"))
     assert load_topology(Path("/root"), None) == []
     assert len(calls) == 1  # only git remote
@@ -142,7 +142,7 @@ def test_no_github_remote_is_empty_and_runs_no_gh(monkeypatch):
 
 def test_no_remote_at_all_is_empty(monkeypatch):
     calls = []
-    monkeypatch.setattr(commands_module.subprocess, "run", fake_run(calls, remote=""))
+    monkeypatch.setattr(commands_module, "run_process", fake_run(calls, remote=""))
     assert load_topology(Path("/root"), None) == []
 
 
@@ -156,7 +156,7 @@ def test_no_remote_at_all_is_empty(monkeypatch):
     UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
 ])
 def test_gh_failures_give_none(monkeypatch, gh):
-    monkeypatch.setattr(commands_module.subprocess, "run", fake_run([], gh=gh))
+    monkeypatch.setattr(commands_module, "run_process", fake_run([], gh=gh))
     assert load_topology(Path("/root"), None) is None
 
 
@@ -172,7 +172,7 @@ def test_git_remote_failure_gives_none_and_runs_no_gh(monkeypatch, error):
         calls.append(args)
         raise error
 
-    monkeypatch.setattr(commands_module.subprocess, "run", run)
+    monkeypatch.setattr(commands_module, "run_process", run)
     assert load_topology(Path("/root"), None) is None
     assert calls == [["git", "remote", "-v"]]
 
@@ -186,7 +186,7 @@ def test_real_repo_without_remote_is_empty(project):
 def test_branch_pr_by_head_any_author_any_state(monkeypatch):
     calls = []
     one = json.dumps([json.loads(GH_JSON)[1]])
-    monkeypatch.setattr(commands_module.subprocess, "run", fake_run(calls, gh=done(one)))
+    monkeypatch.setattr(commands_module, "run_process", fake_run(calls, gh=done(one)))
     result = fetch_branch_pr(Path("/root"), "c")
     assert [(p.number, p.head, p.state) for p in result] == [(8, "c", "draft")]
     args, kwargs = calls[0]
@@ -197,7 +197,7 @@ def test_branch_pr_by_head_any_author_any_state(monkeypatch):
 
 
 def test_branch_without_pr_is_empty_not_failure(monkeypatch):
-    monkeypatch.setattr(commands_module.subprocess, "run", fake_run([], gh=done("[]")))
+    monkeypatch.setattr(commands_module, "run_process", fake_run([], gh=done("[]")))
     assert fetch_branch_pr(Path("/root"), "c") == []
 
 
@@ -208,5 +208,5 @@ def test_branch_without_pr_is_empty_not_failure(monkeypatch):
     done("not json"),
 ])
 def test_branch_pr_failures_give_none(monkeypatch, gh):
-    monkeypatch.setattr(commands_module.subprocess, "run", fake_run([], gh=gh))
+    monkeypatch.setattr(commands_module, "run_process", fake_run([], gh=gh))
     assert fetch_branch_pr(Path("/root"), "c") is None

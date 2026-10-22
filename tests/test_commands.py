@@ -1,4 +1,6 @@
+import os
 import subprocess
+import time
 import urllib.request
 from urllib.parse import urlencode
 
@@ -22,7 +24,7 @@ FAILURES = {
 
 
 def failing_run(failure):
-    """A `subprocess.run` stand-in that always fails with `failure`."""
+    """A `commands.run_process` stand-in that always fails with `failure`."""
     def run(args, **kwargs):
         if isinstance(failure, BaseException):
             raise failure
@@ -34,7 +36,7 @@ def failing_run(failure):
 def fail_commands(request, monkeypatch):
     """Make every command fail one way. Call it after git setup is done."""
     return lambda: monkeypatch.setattr(
-        commands.subprocess, "run", failing_run(FAILURES[request.param])
+        commands, "run_process", failing_run(FAILURES[request.param])
     )
 
 
@@ -52,7 +54,7 @@ def test_run_passes_cwd_and_timeout(monkeypatch, tmp_path):
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, "out", "")
 
-    monkeypatch.setattr(commands.subprocess, "run", run)
+    monkeypatch.setattr(commands, "run_process", run)
     assert commands.run(["git", "x"], tmp_path, 7) == "out"
     args, kwargs = calls[0]
     assert args == ["git", "x"]
@@ -60,11 +62,14 @@ def test_run_passes_cwd_and_timeout(monkeypatch, tmp_path):
     assert kwargs["timeout"] == 7
     assert kwargs["capture_output"] and kwargs["text"]
     assert kwargs["encoding"] == "utf-8"
+    assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
+    assert kwargs["env"]["GH_PROMPT_DISABLED"] == "1"
 
 
 @pytest.mark.parametrize("failure", list(FAILURES.values()), ids=list(FAILURES))
 def test_run_failure_gives_none(monkeypatch, failure, tmp_path):
-    monkeypatch.setattr(commands.subprocess, "run", failing_run(failure))
+    monkeypatch.setattr(commands, "run_process", failing_run(failure))
     assert commands.run(["git", "x"], tmp_path, 5) is None
 
 
@@ -75,6 +80,40 @@ def test_real_nonzero_and_missing_give_none(tmp_path):
 
 def test_real_timeout_gives_none(tmp_path):
     assert commands.run(["sleep", "5"], tmp_path, 0.2) is None
+
+
+def test_stdin_is_closed(tmp_path):
+    # `cat` waits on an open stdin; a closed one gives EOF at once.
+    started = time.monotonic()
+    assert commands.run(["cat"], tmp_path, 5) == ""
+    assert time.monotonic() - started < 2
+
+
+def test_prompts_are_disabled_and_path_kept(tmp_path):
+    script = 'echo "$GIT_TERMINAL_PROMPT $GH_PROMPT_DISABLED"; echo "$PATH"'
+    out = commands.run(["sh", "-c", script], tmp_path, 5)
+    assert out == f"0 1\n{os.environ['PATH']}\n"
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_timeout_leaves_no_child_behind(tmp_path):
+    # The child sleeps long after its parent times out, holding stdout open.
+    script = "sleep 30 & echo $! > child; echo $$ > parent; wait"
+    started = time.monotonic()
+    assert commands.run(["sh", "-c", script], tmp_path, 0.5) is None
+    assert time.monotonic() - started < 5
+    pids = [int((tmp_path / name).read_text()) for name in ("parent", "child")]
+    deadline = time.monotonic() + 5  # init reaps the orphaned child
+    while any(alive(pid) for pid in pids) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not any(alive(pid) for pid in pids)
 
 
 # --- callers fail soft ---
