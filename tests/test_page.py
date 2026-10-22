@@ -5,6 +5,7 @@ from pathlib import Path
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.page import relative_time, render_page
 from bmad_dash.prs import PullRequest
+from bmad_dash.rules import waiting_items
 from bmad_dash.signals import Activity
 from bmad_dash.tree import Ticket, TreeItem
 
@@ -441,6 +442,19 @@ def test_nothing_open_without_status_asks_to_confirm_close():
     assert "show-finished" not in markup(html)
 
 
+def test_unknown_open_state_is_listed_not_confirm_close():
+    html = render([finished_tree(signals_initiative([{"state": "blocked"}]))])
+    assert status_text(html) == "1 blocked·0/1 done"
+    assert "confirm close" not in html
+
+
+def test_unknown_states_follow_backlog_in_first_appearance_order():
+    tickets = [{"state": "waiting"}, {"state": "backlog"}, {"state": "blocked"},
+               {"state": "waiting"}, {"state": "done"}]
+    initiative = finished_tree(signals_initiative(tickets))
+    assert waiting_items(initiative) == ["1 backlog", "2 waiting", "1 blocked"]
+
+
 def test_no_confirm_cue_when_tickets_unavailable():
     html = render([finished_tree(signals_initiative(None))])
     assert "confirm close" not in html
@@ -488,6 +502,49 @@ def test_finished_row_is_never_stale_and_ignores_tickets_failure():
     html = markup(render([closed]))
     assert '<div class="c-status" role="cell"><span class="done-n">dropped</span></div>' in html
     assert "stale" not in html
+
+
+def test_finished_initiative_tree_has_no_stale_tags():
+    initiative = tree_initiative([{"state": "done"}])  # stale forge, stale ticket
+    initiative.top_tickets = [Ticket("9", "Top", "planned", None,
+                                     NOW - timedelta(days=30), True)]
+    assert 'class="stale-tag"' in render([initiative])
+    initiative.status = "done"
+    html = render([initiative])
+    assert "stale-tag" not in html.split('class="panel"')[1]
+
+
+def test_top_tickets_come_after_epics_at_depth_zero():
+    initiative = tree_initiative()
+    initiative.top_tickets = [Ticket("9", "Top <t>", "planned",
+                                     "initiative-a/story-top-plan.md", NOW, False)]
+    rows = rows_of(render([initiative]))
+    assert '<span role="cell" class="t-kind">9</span>' in rows[-1]
+    assert 'class="t-name d0"' in rows[-1]
+    assert 'href="/file/initiative-a/story-top-plan.md"' in rows[-1]
+    assert "Top &lt;t&gt;" in rows[-1]
+
+
+def test_only_top_tickets_still_get_a_caret_and_panel():
+    initiative = Initiative("initiative-a", "A", [], tickets=[{"state": "planned"}])
+    initiative.top_tickets = [Ticket("1", "Top", "planned", None, NOW, False)]
+    html = render([initiative])
+    assert 'class="toggle"' in html
+    assert 'class="panel"' in html
+    assert "Top" in rows_of(html)[-1]
+
+
+def test_tickets_unavailable_has_no_top_tickets_and_shows_note():
+    initiative = tree_initiative(None)
+    html = render([initiative])
+    assert "tickets unavailable" in html
+    assert initiative.top_tickets == []
+
+
+def test_script_drops_vscode_failed_from_url():
+    html = render([])
+    assert "history.replaceState" in html
+    assert 'params.has("vscode_failed")' in html
 
 
 def test_finished_row_keeps_done_count():

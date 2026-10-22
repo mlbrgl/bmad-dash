@@ -11,6 +11,8 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
 - Any open item untouched for `STALE_AFTER` is stale instead. Finished is never stale.
 - Ticket: stale when not done or dropped and untouched for `STALE_AFTER`.
 - Ticket counts: done/total, dropped tickets counted in neither.
+- Initiative-level tickets (those `tickets.py` lists with the initiative folder
+  as their `epic`) show after the epics, at the initiative level.
 """
 
 import json
@@ -268,7 +270,8 @@ def make_ticket(
     raw: dict, folder: Path, output_dir: Path, plans: dict[str, Path], now: datetime
 ) -> Ticket:
     """One ticket row. Its file is its plan, else its leaf file. Its updated time
-    is that file's mtime, else the epic's `tickets.toml` mtime."""
+    is that file's mtime, else the `tickets.toml` mtime of `folder` (its epic,
+    or the initiative for initiative-level tickets)."""
     leaf_name = raw.get("file")
     leaf = folder / leaf_name if isinstance(leaf_name, str) and leaf_name else None
 
@@ -347,3 +350,19 @@ def build_tree(
         for d in sub_dirs(initiative_dir, "epic-")
     ]
     return doc_items(initiative_dir, output_dir, now, last_commit) + epics
+
+
+def initiative_tickets(
+    initiative_dir: Path, tickets: list[dict] | None, now: datetime
+) -> list[Ticket]:
+    """Tickets that sit directly in the initiative folder, not in an epic.
+    `tickets.py` gives them the initiative folder name as their `epic`.
+    Empty when tickets are unavailable."""
+    if tickets is None:
+        return []
+    plans = plans_by_ticket(initiative_dir)
+    return [
+        make_ticket(t, initiative_dir, initiative_dir.parent, plans, now)
+        for t in tickets
+        if t.get("epic") == initiative_dir.name
+    ]

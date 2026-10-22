@@ -24,7 +24,8 @@ failed". Items untouched for 14 days are stale. Rows are sorted newest
 activity first. Initiatives whose file has `status: done` or `dropped` sit
 behind "Show finished (n)"; one with nothing open and no such status says
 `confirm close or add work`.
-Expand a row to see its forges, specs, walkthroughs and epics.
+Expand a row to see its forges, specs, walkthroughs and epics, then any tickets
+that sit directly in the initiative folder.
 
 `/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
 relative to `_bmad-output/`. A missing path or one outside `_bmad-output/` gets

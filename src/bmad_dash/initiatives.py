@@ -13,7 +13,14 @@ from pathlib import Path
 
 from bmad_dash import commands
 from bmad_dash.signals import Activity, last_activity, worktree_commits
-from bmad_dash.tree import TreeItem, build_tree, frontmatter, load_tickets
+from bmad_dash.tree import (
+    Ticket,
+    TreeItem,
+    build_tree,
+    frontmatter,
+    initiative_tickets,
+    load_tickets,
+)
 
 
 @dataclass
@@ -32,6 +39,8 @@ class Initiative:
     # From one `tickets.py status` call; None when it failed. Shared by the tree and Status.
     tickets: list[dict] | None = None
     tree: list[TreeItem] = field(default_factory=list)
+    # Tickets directly in the initiative folder (no epic); shown after the epics.
+    top_tickets: list[Ticket] = field(default_factory=list)
     activity: Activity | None = None
     # Initiative file frontmatter `status`; "done" or "dropped" means finished.
     status: str = ""
@@ -113,6 +122,7 @@ def make_initiative(
         worktrees=worktrees,
         tickets=tickets,
         tree=build_tree(initiative_dir, tickets, now, last_commit),
+        top_tickets=initiative_tickets(initiative_dir, tickets, now),
         activity=last_activity(initiative_dir, worktrees, commits),
         status=fields.get("status", ""),
     )

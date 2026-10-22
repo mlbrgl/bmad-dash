@@ -17,7 +17,13 @@ from urllib.parse import quote, urlencode
 from bmad_dash import assets
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.prs import PullRequest
-from bmad_dash.rules import by_activity, is_stale, row_pr, status_parts
+from bmad_dash.rules import (
+    by_activity,
+    is_stale,
+    row_pr,
+    status_parts,
+    tree_shows_stale,
+)
 from bmad_dash.tree import STALE, Ticket, TreeItem
 
 
@@ -97,17 +103,18 @@ def tree_row(kind: str, name: str, word: str, updated: str) -> str:
     )
 
 
-def ticket_row(ticket: Ticket, depth: int, now: datetime) -> str:
+def ticket_row(ticket: Ticket, depth: int, now: datetime, show_stale: bool) -> str:
     return tree_row(
         ticket.ref,
         name_cell(ticket.title, ticket.path, depth),
         word_cell(ticket.word),
-        updated_cell(ticket.updated, ticket.stale, now),
+        updated_cell(ticket.updated, show_stale and ticket.stale, now),
     )
 
 
-def item_rows(item: TreeItem, depth: int, now: datetime) -> list[str]:
-    """The item's row, then its children's, then its tickets'.
+def item_rows(item: TreeItem, depth: int, now: datetime, show_stale: bool) -> list[str]:
+    """The item's row, then its children's, then its tickets'. With
+    `show_stale` off, no row gets a stale tag.
 
     An epic with exactly one spec nests its tickets under that spec, right
     after the spec's row (before any walkthroughs).
@@ -116,20 +123,26 @@ def item_rows(item: TreeItem, depth: int, now: datetime) -> list[str]:
         item.kind,
         name_cell(item.name, item.path, depth, item.report, item.report_label),
         word_cell(item.word),
-        updated_cell(item.updated, item.state == STALE, now),
+        updated_cell(item.updated, show_stale and item.state == STALE, now),
     )]
     specs = [child for child in item.children if child.kind == "spec"]
     nest_under = specs[0] if len(specs) == 1 else None
     for child in item.children:
-        rows += item_rows(child, depth + 1, now)
+        rows += item_rows(child, depth + 1, now, show_stale)
         if child is nest_under:
-            rows += [ticket_row(t, depth + 2, now) for t in item.tickets]
+            rows += [ticket_row(t, depth + 2, now, show_stale) for t in item.tickets]
     if nest_under is None:
-        rows += [ticket_row(t, depth + 1, now) for t in item.tickets]
+        rows += [ticket_row(t, depth + 1, now, show_stale) for t in item.tickets]
     return rows
 
 
 TREE_HEADS = ["kind", "name", "status", "updated"]
+
+
+def has_panel(initiative: Initiative) -> bool:
+    """A row has a tree panel (and a caret) when its tree or its
+    initiative-level tickets have anything to show."""
+    return bool(initiative.tree or initiative.top_tickets)
 
 
 def panel_content(initiative: Initiative, now: datetime) -> str:
@@ -138,8 +151,11 @@ def panel_content(initiative: Initiative, now: datetime) -> str:
         note = '<p class="muted t-note">tickets unavailable</p>'
     heads = "".join(f'<span role="columnheader">{h}</span>' for h in TREE_HEADS)
     rows = [f'<div class="t-row t-head" role="row">{heads}</div>']
+    show_stale = tree_shows_stale(initiative)
     for item in initiative.tree:
-        rows += item_rows(item, 0, now)
+        rows += item_rows(item, 0, now, show_stale)
+    # Initiative-level tickets come after the epics, at the top level.
+    rows += [ticket_row(t, 0, now, show_stale) for t in initiative.top_tickets]
     label = escape(f"{initiative.title} contents")
     return f'{note}<div class="tree" role="table" aria-label="{label}">{"".join(rows)}</div>'
 
@@ -150,7 +166,7 @@ def initiative_cell(initiative: Initiative, panel_id: str, is_open: bool) -> str
     """Title with slug below. When there is a tree to show, a caret button
     before the title toggles it; the title itself is plain text."""
     title = escape(initiative.title)
-    if initiative.tree:
+    if has_panel(initiative):
         expanded = "true" if is_open else "false"
         caret = (
             f'<button type="button" class="toggle" aria-expanded="{expanded}"'
@@ -311,7 +327,7 @@ def initiative_row(
     caret -> worktree -> Resume -> PR -> tree links. CSS puts the panel on
     grid row 2."""
     panel_id = f"panel-{index}"
-    is_open = is_open and bool(initiative.tree)
+    is_open = is_open and has_panel(initiative)
     cells = [
         initiative_cell(initiative, panel_id, is_open),
         worktree_cell(initiative, vscode_failed),
@@ -319,7 +335,7 @@ def initiative_row(
         status_cell(initiative, now),
         actions_cell(initiative, row_pr(initiative, prs)),
     ]
-    if initiative.tree:
+    if has_panel(initiative):
         cells.append(panel_cell(initiative, panel_id, is_open, now))
     css_class = "init is-finished" if initiative.finished else "init"
     return f'<div class="{css_class}" role="row">{"".join(cells)}</div>'
@@ -342,7 +358,7 @@ def newest_index(initiatives: list[Initiative]) -> int | None:
     ties), or None."""
     best = None
     for index, initiative in enumerate(initiatives):
-        if initiative.activity is None or not initiative.tree:
+        if initiative.activity is None or not has_panel(initiative):
             continue
         if best is None or initiative.activity.when > initiatives[best].activity.when:
             best = index

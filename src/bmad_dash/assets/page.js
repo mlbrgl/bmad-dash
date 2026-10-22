@@ -47,4 +47,15 @@
       more.textContent = open ? "Hide finished" : label;
     });
   }
+
+  // The VS Code failure shows once: drop `vscode_failed` from the URL so a
+  // reload doesn't show it again. No reload, other params and the hash stay.
+  var params = new URLSearchParams(location.search);
+  if (params.has("vscode_failed")) {
+    params.delete("vscode_failed");
+    var search = params.toString();
+    history.replaceState(
+      null, "", location.pathname + (search ? "?" + search : "") + location.hash
+    );
+  }
 })();

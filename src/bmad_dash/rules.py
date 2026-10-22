@@ -8,7 +8,10 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
   unless the initiative is finished.
 - The Status sentence lists waiting items: ticket counts by state, then
   `forge open` and `spec to slice`. At most `MAX_WAITING` show, then `+n`.
+  Every state except `done` and `dropped` is open: `WAITING_STATES` first,
+  then any other state in the order it first appears in the tickets.
   With nothing waiting it says `CONFIRM_CLOSE`.
+- A finished initiative's tree shows no stale tags.
 - The PR button shows the last PR of the stack starting at the row's branch.
 """
 
@@ -41,13 +44,27 @@ def has_open(items: list[TreeItem], kind: str) -> bool:
     )
 
 
+def open_states(tickets: list[dict]) -> list[str]:
+    """`WAITING_STATES`, then the other states except `done` and `dropped`,
+    in the order they first appear. A missing state reads as ""."""
+    states = list(WAITING_STATES)
+    for ticket in tickets:
+        state = str(ticket.get("state") or "")
+        if state not in states and state not in ("done", "dropped"):
+            states.append(state)
+    return states
+
+
 def waiting_items(initiative: Initiative) -> list[str]:
     """Ticket counts by status word, then doc cues."""
     items = []
-    for state in WAITING_STATES:
-        count = sum(1 for t in initiative.tickets if t.get("state") == state)
+    for state in open_states(initiative.tickets):
+        count = sum(
+            1 for t in initiative.tickets if str(t.get("state") or "") == state
+        )
         if count:
-            items.append(f"{count} {status_word(state)}")
+            word = status_word(state) if state else "no state"
+            items.append(f"{count} {word}")
     if has_open(initiative.tree, "forge"):
         items.append("forge open")
     if has_open(initiative.tree, "spec"):
@@ -73,6 +90,12 @@ def status_parts(initiative: Initiative) -> tuple[list[str], tuple[int, int] | N
     counts = ticket_counts(initiative.tickets)
     done_count = counts if counts and counts[1] > 0 else None
     return waiting, done_count
+
+
+def tree_shows_stale(initiative: Initiative) -> bool:
+    """Stale tags show in the tree unless the initiative is finished.
+    Items keep their STALE state either way; only the tag is hidden."""
+    return not initiative.finished
 
 
 def by_activity(initiatives: list[Initiative]) -> list[Initiative]:

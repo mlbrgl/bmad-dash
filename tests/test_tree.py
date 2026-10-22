@@ -14,6 +14,7 @@ from bmad_dash.tree import (
     OPEN,
     STALE,
     build_tree,
+    initiative_tickets,
     load_tickets,
     read_memlog,
 )
@@ -444,6 +445,37 @@ def test_kinds_sorted_and_links(initiative):
     paths = {i.name: i.path for i in build_tree(initiative, [], NOW)}
     assert paths["forge-a"] == "initiative-x/forge-a/forge-a.md"
     assert paths["spec-nofile"] is None
+
+
+# --- initiative-level tickets ---
+
+
+def test_initiative_level_ticket_links_its_plan(initiative):
+    make_folder(initiative, "epic-x")
+    write_plan(initiative, "story-top-plan.md", "'7'", NOW - timedelta(days=1))
+    tickets = [ticket("1.1", "done"), {**ticket("7", "planned", "initiative-x"), "id": 7}]
+    top = only(initiative_tickets(initiative, tickets, NOW))
+    assert top.ref == "7"
+    assert top.word == "planned"
+    assert top.path == "initiative-x/story-top-plan.md"
+    assert top.updated == NOW - timedelta(days=1)
+    # The epic keeps only its own ticket.
+    assert [t.ref for t in only(build_tree(initiative, tickets, NOW)).tickets] == ["1.1"]
+
+
+def test_initiative_level_ticket_falls_back_to_initiative_tickets_toml(initiative):
+    toml = initiative / "tickets.toml"
+    toml.write_text("")
+    when = NOW - timedelta(days=20)
+    os.utime(toml, (when.timestamp(), when.timestamp()))
+    top = only(initiative_tickets(initiative, [ticket("1", "backlog", "initiative-x")], NOW))
+    assert top.path is None
+    assert top.updated == when
+    assert top.stale is True
+
+
+def test_no_initiative_level_tickets_when_tickets_unavailable(initiative):
+    assert initiative_tickets(initiative, None, NOW) == []
 
 
 # --- tickets.py ---

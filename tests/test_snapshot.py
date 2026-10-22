@@ -47,7 +47,8 @@ def busy_tree() -> list[TreeItem]:
 
 
 def initiatives() -> list[Initiative]:
-    states = ["review", "in-progress", "in-progress", "planned", "backlog", "done", "dropped"]
+    states = ["review", "in-progress", "in-progress", "planned", "backlog", "done", "dropped",
+              "planned"]  # the last one is the top-level ticket
     return [
         Initiative(
             slug="initiative-busy",
@@ -55,6 +56,8 @@ def initiatives() -> list[Initiative]:
             worktrees=[Worktree(Path("/tmp/snapshot-root/wt busy"), "feature-busy")],
             tickets=[{"state": s} for s in states],
             tree=busy_tree(),
+            top_tickets=[Ticket("7", "Top-level ticket", "planned",
+                                "initiative-busy/story-top-plan.md", ago(days=2), False)],
             activity=Activity(ago(minutes=12), "Wrote the plan", "memlog"),
             status="active",
         ),
@@ -74,7 +77,9 @@ def initiatives() -> list[Initiative]:
             slug="initiative-closed",
             title="Closed one",
             tickets=[{"state": "done"}, {"state": "dropped"}],
-            tree=[TreeItem("spec", "spec-closed", None, ago(days=40), FINISHED)],
+            # The forge is STALE, but a finished initiative's tree shows no stale tag.
+            tree=[TreeItem("forge", "forge-closed", None, ago(days=40), STALE),
+                  TreeItem("spec", "spec-closed", None, ago(days=40), FINISHED)],
             activity=Activity(ago(days=2), "Closed it", "memlog"),
             status="done",
         ),

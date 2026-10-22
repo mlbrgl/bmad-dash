@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 from conftest import write_initiative
 
 from bmad_dash.initiatives import Worktree, active_initiative, list_initiatives
+from bmad_dash.page import render_page
 from bmad_dash.tree import OPEN, STALE
 
 
@@ -86,3 +88,21 @@ def test_no_worktree_walkthrough_uses_age_only(project):
     os.utime(folder / "walkthrough-a.md", (stamp, stamp))
 
     assert by_slug(project)["initiative-orphan"].tree[0].state == OPEN
+
+
+def test_initiative_level_ticket_shows_in_tree_and_counts(project):
+    # A fake tickets.py that lists one ticket sitting in the initiative folder.
+    data = {"tickets": [{"epic": "initiative-orphan", "ref": "1", "title": "Top one",
+                         "state": "planned", "id": 1}]}
+    script = project / "_bmad" / "method" / "scripts" / "tickets.py"
+    script.parent.mkdir(parents=True)
+    script.write_text(f"print({json.dumps(json.dumps(data))})\n")
+
+    orphan = by_slug(project)["initiative-orphan"]
+    assert orphan.tree == []
+    assert [t.title for t in orphan.top_tickets] == ["Top one"]
+
+    html = render_page([orphan], project)
+    assert "Top one" in html
+    assert 'class="toggle"' in html  # only a top ticket, still a caret
+    assert "0/1 done" in html
