@@ -50,12 +50,16 @@ gives whose config names it. Click the caret to show a row's tree.
 - **Resume** opens a new Claude Code session in that worktree
   (`claude://code/new`) with `/bmad Resume work on <slug>` prefilled.
 - **#n** opens, in a new tab, the last PR of the stack that starts at the
-  worktree's branch (following PRs based on each other's branch). It needs
-  `gh` installed and signed in; PRs come from one
-  `gh pr list --author @me --state all --limit 100` per page load. No button
-  for a fork in the stack, no PR, or a detached worktree. If `gh` fails, the
-  header says "Couldn't reach GitHub". Repos without a `github.com` remote
-  skip it silently.
+  worktree's branch. It needs `gh` installed and signed in. In a repo
+  Graphite tracks, `gt state` gives the stack (the branch, then its tracked
+  children), and one `gh pr list --head <top branch>` per stack finds the
+  newest PR from the top, by anyone. Without `gt`, or when the repo isn't
+  tracked or `gt` fails, it falls back to one
+  `gh pr list --author @me --state all --limit 100` per page load and follows
+  PRs based on each other's branch. No button for a fork in the stack, no PR,
+  a detached worktree, or a row on trunk. If `gh` fails, the header says
+  "Couldn't reach GitHub". Repos without a `github.com` remote skip it
+  silently.
 
 A row without a worktree says `no worktree` and has no actions.
 

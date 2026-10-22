@@ -263,7 +263,7 @@ def test_tab_order_caret_worktree_resume_pr_tree():
     initiative = tree_initiative()
     initiative.worktrees = [Worktree(Path("/x/wt"), "b")]
     initiative.tree[0].path = "a/epic.md"
-    html = render_page([initiative], Path("/root"), now=NOW, prs=[pr(7, "b")])
+    html = render_page([initiative], Path("/root"), now=NOW, prs={"initiative-a": pr(7, "b")})
     row = html.split('<div class="init" role="row">')[1]
     order = [row.index(marker) for marker in
              ('class="toggle"', 'class="wt"', ">Resume<", ">#7<", 'class="name-link"')]
@@ -700,14 +700,19 @@ def pr(number, head, base="main", state="open"):
 
 
 def with_prs(prs, branch="b", worktrees=None):
+    """Render one row, initiative-a. `prs` maps slug -> PR, or None (GitHub failed)."""
     if worktrees is None:
         worktrees = [Worktree(WT, branch)]
     initiative = Initiative("initiative-a", "A", worktrees)
     return render_page([initiative], Path("/root"), now=NOW, prs=prs)
 
 
+def with_pr(pr_, **kwargs):
+    return with_prs({"initiative-a": pr_}, **kwargs)
+
+
 def test_pr_button_opens_lone_pr_in_new_tab():
-    actions = cell(with_prs([pr(7, "b")]), "c-btns")
+    actions = cell(with_pr(pr(7, "b")), "c-btns")
     assert ('<a class="btn btn-2 pr" href="https://github.com/o/r/pull/7"'
             ' target="_blank" rel="noopener">') in actions
     assert '<svg class="pr-icon pr-open" aria-hidden="true"' in actions
@@ -716,15 +721,15 @@ def test_pr_button_opens_lone_pr_in_new_tab():
     assert actions.index(">Resume<") < actions.index(">#7<")
 
 
-def test_pr_button_shows_stack_top():
-    prs = [pr(7, "b"), pr(8, "c", base="b"), pr(9, "d", base="c")]
-    actions = cell(with_prs(prs), "c-btns")
-    assert ">#9<" in actions and ">#7<" not in actions
+def test_pr_button_shows_the_mapped_pr():
+    # Which PR is the stack's top is stack.stack_prs's job; the page shows it.
+    actions = cell(with_pr(pr(9, "d", base="c")), "c-btns")
+    assert ">#9<" in actions
 
 
 def test_merged_closed_and_draft_tops_are_muted():
     for state in ("merged", "closed", "draft"):
-        actions = cell(with_prs([pr(7, "b", state=state)]), "c-btns")
+        actions = cell(with_pr(pr(7, "b", state=state)), "c-btns")
         assert '<svg class="pr-icon pr-muted"' in actions
         assert f'<span class="sr-only">{state} pull request </span>#7' in actions
 
@@ -732,22 +737,20 @@ def test_merged_closed_and_draft_tops_are_muted():
 def test_each_state_has_its_own_icon():
     paths = set()
     for state in ("open", "draft", "merged", "closed"):
-        actions = cell(with_prs([pr(7, "b", state=state)]), "c-btns")
+        actions = cell(with_pr(pr(7, "b", state=state)), "c-btns")
         paths.add(re.search(r'<path fill="currentColor" d="([^"]+)"', actions).group(1))
     assert len(paths) == 4
 
 
-def test_no_pr_button_for_fork_no_pr_detached_or_no_worktree():
-    fork = [pr(7, "b"), pr(8, "c", base="b"), pr(9, "d", base="b")]
-    assert 'class="btn btn-2 pr"' not in with_prs(fork)
-    assert 'class="btn btn-2 pr"' not in with_prs([pr(7, "other")])
-    assert 'class="btn btn-2 pr"' not in with_prs([pr(7, "detached")], branch="detached")
-    assert 'class="btn btn-2 pr"' not in with_prs([pr(7, "b")], worktrees=[])
+def test_no_pr_button_without_a_mapped_pr_or_worktree():
+    assert 'class="btn btn-2 pr"' not in with_prs({})
+    assert 'class="btn btn-2 pr"' not in with_prs({"other-slug": pr(7, "b")})
+    assert 'class="btn btn-2 pr"' not in with_pr(pr(7, "b"), worktrees=[])
 
 
 def test_pr_url_is_escaped():
     evil = PullRequest(7, "b", "main", "open", 'https://x/"><script>')
-    html = with_prs([evil])
+    html = with_pr(evil)
     assert '"><script>' not in html
     assert 'href="https://x/&quot;&gt;&lt;script&gt;"' in html
 
@@ -761,6 +764,6 @@ def test_github_failure_shows_header_line_and_no_pr_buttons():
 
 
 def test_no_github_line_when_prs_known_or_empty():
-    assert "Couldn't reach GitHub" not in with_prs([])
-    assert "Couldn't reach GitHub" not in with_prs([pr(7, "b")])
+    assert "Couldn't reach GitHub" not in with_prs({})
+    assert "Couldn't reach GitHub" not in with_pr(pr(7, "b"))
     assert "Couldn't reach GitHub" not in render([])

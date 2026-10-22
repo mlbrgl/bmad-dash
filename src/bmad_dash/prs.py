@@ -1,4 +1,5 @@
-"""The user's GitHub pull requests, and the last PR of a branch's stack."""
+"""GitHub pull requests: the user's recent ones, or the one from a branch,
+and the last PR of a branch's stack."""
 
 import json
 from dataclasses import dataclass
@@ -7,10 +8,20 @@ from pathlib import Path
 from bmad_dash import commands
 
 GH_TIMEOUT = 10  # seconds
+GH_FIELDS = "number,headRefName,baseRefName,state,isDraft,url"
 GH_COMMAND = [
     "gh", "pr", "list", "--author", "@me", "--state", "all", "--limit", "100",
-    "--json", "number,headRefName,baseRefName,state,isDraft,url",
+    "--json", GH_FIELDS,
 ]
+
+
+def branch_pr_command(branch: str) -> list[str]:
+    """`gh pr list` for the newest PR from `branch`, by anyone, in any state.
+    Exits 0 with `[]` when there is none, unlike `gh pr view`."""
+    return [
+        "gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "1",
+        "--json", GH_FIELDS,
+    ]
 
 
 @dataclass
@@ -37,15 +48,9 @@ def shown_state(raw: dict) -> str:
     return str(raw.get("state", "")).lower()  # gh says OPEN, MERGED, CLOSED
 
 
-def fetch_prs(root: Path) -> list[PullRequest] | None:
-    """The user's PRs in the repo at `root`, from one `gh pr list` call.
-    `[]` when the repo has no GitHub remote (gh is not run), None when git or gh fails."""
-    remote = has_github_remote(root)
-    if remote is None:
-        return None
-    if not remote:
-        return []
-    output = commands.run(GH_COMMAND, root, GH_TIMEOUT)
+def parse_prs(output: str | None) -> list[PullRequest] | None:
+    """PRs from `gh pr list --json` output. None when gh failed or the JSON
+    isn't a list of PRs."""
     if output is None:
         return None
     try:
@@ -61,6 +66,29 @@ def fetch_prs(root: Path) -> list[PullRequest] | None:
         ]
     except (ValueError, TypeError, KeyError):
         return None
+
+
+def list_my_prs(root: Path) -> list[PullRequest] | None:
+    """The user's newest 100 PRs in the repo at `root`. None when gh fails.
+    Doesn't check the remote: callers do."""
+    return parse_prs(commands.run(GH_COMMAND, root, GH_TIMEOUT))
+
+
+def fetch_prs(root: Path) -> list[PullRequest] | None:
+    """The user's PRs in the repo at `root`, from one `gh pr list` call.
+    `[]` when the repo has no GitHub remote (gh is not run), None when git or gh fails."""
+    remote = has_github_remote(root)
+    if remote is None:
+        return None
+    if not remote:
+        return []
+    return list_my_prs(root)
+
+
+def fetch_branch_pr(root: Path, branch: str) -> list[PullRequest] | None:
+    """The newest PR from `branch` as a one-item list, whoever wrote it.
+    `[]` when the branch has no PR, None when gh fails."""
+    return parse_prs(commands.run(branch_pr_command(branch), root, GH_TIMEOUT))
 
 
 def last_pr(prs: list[PullRequest], branch: str) -> PullRequest | None:

@@ -27,7 +27,7 @@ from bmad_dash.opener import (
     wrapper_page,
 )
 from bmad_dash.page import render_page
-from bmad_dash.prs import fetch_prs
+from bmad_dash.stack import load_topology, stack_prs
 
 HOST = "127.0.0.1"
 MAX_FORM_BYTES = 1024
@@ -106,14 +106,16 @@ def make_server(
                 return
             # Only picks which row says "Couldn't open VS Code"; runs nothing.
             vscode_failed = parse_qs(url.query).get("vscode_failed", [""])[0]
-            # Built on each request so the page is always current. PRs come
-            # from GitHub at the same time, so the page waits for the slower one.
+            # Built on each request so the page is always current. The stack
+            # topology (gt, or the user's PRs) loads while the initiatives do;
+            # the per-stack PR lookups need the initiatives, so they come after.
             with ThreadPoolExecutor(max_workers=1) as pool:
-                prs = pool.submit(fetch_prs, root)
+                topology = pool.submit(load_topology, root)
                 initiatives = list_initiatives(root)
-                body = render_page(
-                    initiatives, root, vscode_failed=vscode_failed, prs=prs.result()
-                ).encode("utf-8")
+                prs = stack_prs(root, initiatives, topology.result())
+            body = render_page(
+                initiatives, root, vscode_failed=vscode_failed, prs=prs
+            ).encode("utf-8")
             self.send_html(body)
 
         def do_POST(self):

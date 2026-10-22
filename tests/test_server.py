@@ -1,4 +1,5 @@
 import http.client
+import json
 import socket
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import urllib.request
 import pytest
 
 import bmad_dash.server as server_module
+from bmad_dash import commands as commands_module
 
 
 @pytest.fixture
@@ -41,33 +43,87 @@ def test_no_github_remote_shows_no_github_line(server):
     assert 'class="btn btn-2 pr"' not in html
 
 
-def test_fetched_prs_reach_the_page(project, monkeypatch, serve):
-    from bmad_dash import server as server_module
-    from bmad_dash.prs import PullRequest
+REMOTE = "origin\tgit@github.com:o/r.git (fetch)\n"
+# gt state for feature-a -> b -> c (feature-a is initiative-matched's branch).
+GT_STATE = json.dumps({
+    "main": {"trunk": True},
+    "feature-a": {"trunk": False, "parents": [{"ref": "main", "sha": "1"}]},
+    "b": {"trunk": False, "parents": [{"ref": "feature-a", "sha": "2"}]},
+    "c": {"trunk": False, "parents": [{"ref": "b", "sha": "3"}]},
+})
 
-    calls = []
 
-    def fake_fetch(root):
-        calls.append(root)
-        return [PullRequest(7, "feature-a", "main", "open", "https://github.com/o/r/pull/7")]
+def pr_json(number, head, base="main"):
+    return {"number": number, "headRefName": head, "baseRefName": base,
+            "state": "OPEN", "isDraft": False,
+            "url": f"https://github.com/o/r/pull/{number}"}
 
-    monkeypatch.setattr(server_module, "fetch_prs", fake_fetch)
-    srv = serve(project)
+
+def fake_github(monkeypatch, calls, gh):
+    """Real git, except a GitHub remote; fake `gt state` and `gh`.
+    `gh(args)` gives (exit code, stdout)."""
+    real_run = subprocess.run
+
+    def run(args, **kwargs):
+        if args[:2] == ["git", "remote"]:
+            return subprocess.CompletedProcess(args, 0, REMOTE, "")
+        if args[0] in ("gt", "gh"):
+            calls.append(args)
+            code, stdout = (0, GT_STATE) if args[0] == "gt" else gh(args)
+            return subprocess.CompletedProcess(args, code, stdout, "")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(commands_module.subprocess, "run", run)
+
+
+def get_page(srv):
     url = f"http://127.0.0.1:{srv.server_port}/"
     with urllib.request.urlopen(url) as response:
-        html = response.read().decode()
-    assert calls == [project]
+        return response.read().decode()
+
+
+def track_with_graphite(project):
+    (project / ".git" / ".graphite_repo_config").write_text("{}")
+
+
+def test_gt_stack_top_pr_reaches_the_page(project, monkeypatch, serve):
+    track_with_graphite(project)
+    calls = []
+
+    def gh(args):
+        # Only c has a PR; a lookup by head finds it whoever wrote it.
+        head = args[args.index("--head") + 1]
+        return 0, json.dumps([pr_json(31, "c", base="b")] if head == "c" else [])
+
+    fake_github(monkeypatch, calls, gh)
+    html = get_page(serve(project))
+    assert 'href="https://github.com/o/r/pull/31"' in html
+    assert "Couldn't reach GitHub" not in html
+    assert ["gt", "state"] in calls
+    assert not any("--author" in args for args in calls)  # no fallback walk
+
+
+def test_untracked_repo_runs_no_gt_and_walks_my_prs(project, monkeypatch, serve):
+    calls = []
+    fake_github(monkeypatch, calls, lambda args: (0, json.dumps([pr_json(7, "feature-a")])))
+    html = get_page(serve(project))
+    assert not any(args[0] == "gt" for args in calls)
+    assert any("--author" in args for args in calls)
     assert 'href="https://github.com/o/r/pull/7"' in html
 
 
-def test_github_failure_keeps_page(project, monkeypatch, serve):
-    from bmad_dash import server as server_module
+def test_gh_failure_in_gt_path_shows_header_and_no_buttons(project, monkeypatch, serve):
+    track_with_graphite(project)
+    fake_github(monkeypatch, [], lambda args: (1, ""))
+    html = get_page(serve(project))
+    assert "Couldn't reach GitHub" in html
+    assert 'class="btn btn-2 pr"' not in html
+    assert "Matched one" in html
 
-    monkeypatch.setattr(server_module, "fetch_prs", lambda root: None)
-    srv = serve(project)
-    url = f"http://127.0.0.1:{srv.server_port}/"
-    with urllib.request.urlopen(url) as response:
-        html = response.read().decode()
+
+def test_github_failure_keeps_page(project, monkeypatch, serve):
+    monkeypatch.setattr(server_module, "load_topology", lambda root: None)
+    html = get_page(serve(project))
     assert "Couldn't reach GitHub" in html
     assert "Matched one" in html
 

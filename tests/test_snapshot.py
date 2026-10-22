@@ -86,7 +86,7 @@ def initiatives() -> list[Initiative]:
     ]
 
 
-PRS = [PullRequest(42, "feature-busy", "main", "draft", "https://github.com/o/r/pull/42")]
+PRS = {"initiative-busy": PullRequest(42, "feature-busy", "main", "draft", "https://github.com/o/r/pull/42")}
 
 
 def test_page_matches_golden_file():

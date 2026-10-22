@@ -8,10 +8,11 @@ What a row says comes from `rules.py`; this module only turns it into HTML.
 The CSS and JS live in `assets/` and are inlined.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping
 from datetime import datetime
 from html import escape
 from pathlib import Path
+from types import MappingProxyType
 from urllib.parse import quote, urlencode
 
 from bmad_dash import assets
@@ -20,7 +21,6 @@ from bmad_dash.prs import PullRequest
 from bmad_dash.rules import (
     by_activity,
     is_stale,
-    row_pr,
     status_parts,
     tree_shows_stale,
 )
@@ -288,6 +288,8 @@ PR_ICONS = {
     "closed": "M3.25 1A2.25 2.25 0 0 1 4 5.372v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.251 2.251 0 0 1 3.25 1Zm9.5 5.5a.75.75 0 0 1 .75.75v3.378a2.251 2.251 0 1 1-1.5 0V7.25a.75.75 0 0 1 .75-.75Zm-2.03-5.273a.75.75 0 0 1 1.06 0l.97.97.97-.97a.748.748 0 0 1 1.265.332.75.75 0 0 1-.205.729l-.97.97.97.97a.751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018l-.97-.97-.97.97a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734l.97-.97-.97-.97a.75.75 0 0 1 0-1.06ZM2.5 3.25a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM3.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm9.5 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z",
 }
 GITHUB_FAILED = "Couldn't reach GitHub"
+# Default `prs`: no row has a PR. Read-only, so safe as a default argument.
+NO_PRS: Mapping[str, PullRequest] = MappingProxyType({})
 
 
 def pr_link(pr: PullRequest) -> str:
@@ -321,7 +323,7 @@ def initiative_row(
     is_open: bool,
     now: datetime,
     vscode_failed: str = "",
-    prs: Sequence[PullRequest] | None = (),
+    prs: Mapping[str, PullRequest] | None = NO_PRS,
 ) -> str:
     """One grid row. DOM order: the five cells, then the panel, so Tab runs
     caret -> worktree -> Resume -> PR -> tree links. CSS puts the panel on
@@ -333,7 +335,7 @@ def initiative_row(
         worktree_cell(initiative, vscode_failed),
         activity_cell(initiative, now),
         status_cell(initiative, now),
-        actions_cell(initiative, row_pr(initiative, prs)),
+        actions_cell(initiative, prs.get(initiative.slug) if prs else None),
     ]
     if has_panel(initiative):
         cells.append(panel_cell(initiative, panel_id, is_open, now))
@@ -370,7 +372,7 @@ def page_content(
     root_text: str,
     now: datetime,
     vscode_failed: str = "",
-    prs: Sequence[PullRequest] | None = (),
+    prs: Mapping[str, PullRequest] | None = NO_PRS,
 ) -> str:
     """Unfinished rows in the table, finished ones behind Show finished (n).
     `initiatives` come sorted; `root_text` is already escaped. `vscode_failed`
@@ -418,10 +420,11 @@ def render_page(
     root: Path,
     now: datetime | None = None,
     vscode_failed: str = "",
-    prs: Sequence[PullRequest] | None = (),
+    prs: Mapping[str, PullRequest] | None = NO_PRS,
 ) -> str:
     """The whole page. `vscode_failed` is a slug from the URL; it only picks
-    which row shows the failure message. `prs` is None when GitHub couldn't be
+    which row shows the failure message. `prs` maps a slug to the PR its row
+    shows (from `stack.stack_prs`). It is None when GitHub couldn't be
     reached: the header says so and no row gets a PR button."""
     if now is None:
         now = datetime.now()

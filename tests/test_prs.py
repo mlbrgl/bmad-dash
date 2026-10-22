@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from bmad_dash import commands as commands_module
-from bmad_dash.prs import GH_COMMAND, PullRequest, fetch_prs, last_pr
+from bmad_dash.prs import GH_COMMAND, PullRequest, fetch_branch_pr, fetch_prs, last_pr
 
 
 def pr(number, head, base="main", state="open"):
@@ -166,3 +166,34 @@ def test_git_remote_failure_gives_none_and_runs_no_gh(monkeypatch, error):
 
 def test_real_repo_without_remote_is_empty(project):
     assert fetch_prs(project) == []
+
+
+# --- fetch_branch_pr ---
+
+def test_branch_pr_by_head_any_author_any_state(monkeypatch):
+    calls = []
+    one = json.dumps([json.loads(GH_JSON)[1]])
+    monkeypatch.setattr(commands_module.subprocess, "run", fake_run(calls, gh=done(one)))
+    result = fetch_branch_pr(Path("/root"), "c")
+    assert [(p.number, p.head, p.state) for p in result] == [(8, "c", "draft")]
+    args, kwargs = calls[0]
+    assert args == ["gh", "pr", "list", "--head", "c", "--state", "all", "--limit", "1",
+                    "--json", "number,headRefName,baseRefName,state,isDraft,url"]
+    assert "--author" not in args
+    assert kwargs["timeout"] == 10
+
+
+def test_branch_without_pr_is_empty_not_failure(monkeypatch):
+    monkeypatch.setattr(commands_module.subprocess, "run", fake_run([], gh=done("[]")))
+    assert fetch_branch_pr(Path("/root"), "c") == []
+
+
+@pytest.mark.parametrize("gh", [
+    done("", code=1),
+    FileNotFoundError("gh"),
+    subprocess.TimeoutExpired("gh", 10),
+    done("not json"),
+])
+def test_branch_pr_failures_give_none(monkeypatch, gh):
+    monkeypatch.setattr(commands_module.subprocess, "run", fake_run([], gh=gh))
+    assert fetch_branch_pr(Path("/root"), "c") is None

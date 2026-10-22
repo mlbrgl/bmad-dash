@@ -12,10 +12,12 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
   then any other state in the order it first appears in the tickets.
   With nothing waiting it says `CONFIRM_CLOSE`.
 - A finished initiative's tree shows no stale tags.
-- The PR button shows the last PR of the stack starting at the row's branch.
+- The PR button shows the last PR of the stack starting at the row's branch
+  (Stack's last PR). With Graphite, the stack follows `gt state`'s tracked
+  children (`stack_branches`); without it, the user's PRs (`row_pr`).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from bmad_dash.initiatives import Initiative
@@ -114,3 +116,19 @@ def row_pr(initiative: Initiative, prs: Sequence[PullRequest] | None) -> PullReq
     if branch == "detached":
         return None
     return last_pr(list(prs), branch)
+
+
+def stack_branches(children: Mapping[str, Sequence[str]], branch: str) -> list[str] | None:
+    """The stack from `branch` up: `[branch, ..., top]`, following the one
+    child of each branch. `children` maps a branch to its tracked children.
+    None on a fork (two or more children) or a cycle."""
+    stack = [branch]
+    while True:
+        next_branches = children.get(stack[-1], [])
+        if not next_branches:
+            return stack
+        if len(next_branches) > 1:
+            return None  # fork
+        if next_branches[0] in stack:
+            return None  # cycle: no sensible top
+        stack.append(next_branches[0])
