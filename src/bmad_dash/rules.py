@@ -119,6 +119,83 @@ def action_prompt(ticket: Ticket, action: str) -> str:
     return prompt
 
 
+AUTO_PROMPT = (
+    "/loop Build {epic} unattended, one fresh headless run per ticket. "
+    "Each round: run tickets.py next. Stop and report if a ticket of this epic "
+    "has plan status in-progress, or is halted (plan status blocked, or "
+    "blocked_at set); built and in-review tickets count as finished, and a "
+    "ticket only waiting on prerequisites is not halted. If the first ready "
+    "ticket of this epic is hitl, stop. If one is ready, start "
+    "claude -p \"/bmad-build-auto ticket <ref>\" in the background in this "
+    "worktree; when it exits, check the ticket's plan status and its last "
+    "commit, then schedule the next round. If none is ready, stop. "
+    "Stop for no other reason."
+)
+
+# An action is (link text, prompt, aria-label).
+Action = tuple[str, str, str]
+
+
+def retro_path(retro: TreeItem) -> str:
+    """The retro's path as a prompt names it, relative to the worktree."""
+    return f"_bmad-output/{retro.path}"
+
+
+def epic_retro(epic: TreeItem) -> TreeItem | None:
+    """The epic's retro child, if any."""
+    return next((c for c in epic.children if c.kind == "retro"), None)
+
+
+def make_action(text: str, prompt: str, step: str) -> Action:
+    return (text, prompt, f"{text}: {step} in a new session")
+
+
+def resume_action(epic: TreeItem) -> Action:
+    """`resume`; after a rejected retro it also says to address it."""
+    retro = epic_retro(epic)
+    prompt = f"/bmad Resume work on {epic.name}"
+    step = f"resume work on {epic.name}"
+    if retro is not None and retro.word == "rejected" and retro.path:
+        prompt += f": address {retro_path(retro)}"
+        step += " and address its rejected retro"
+    return make_action("resume", prompt, step)
+
+
+def epic_actions(epic: TreeItem) -> list[Action]:
+    """The actions an epic's cell offers; [] means it shows a status."""
+    slug = epic.name
+    auto = make_action("auto", AUTO_PROMPT.format(epic=slug), f"build {slug} unattended")
+    if epic.word == "not started":
+        start = make_action("start", f"/bmad Start work on {slug}", f"start work on {slug}")
+        return [start, auto]
+    if epic.word == "in progress":
+        return [resume_action(epic), auto]
+    if epic.word == "to retro":
+        return [make_action("retro", f"/bmad-retrospective {slug}",
+                            f"run the retrospective for {slug}")]
+    if epic.word == "to close":
+        prompt = f"/bmad-ticket Close {slug}"
+        retro = epic_retro(epic)
+        if any(t.word == "built" for t in epic.tickets) and retro is not None and retro.path:
+            prompt += f": mark its built tickets done, per {retro_path(retro)}"
+        return [make_action("close", prompt, f"close {slug}")]
+    return []
+
+
+def retro_actions(retro: TreeItem, epic: TreeItem) -> list[Action]:
+    """The actions a retro's cell offers; [] means it shows a status."""
+    if not retro.path:
+        return []
+    if retro.word == "open items":
+        prompt = f"/bmad-ticket Turn the action items in {retro_path(retro)} into tickets"
+        return [make_action("plan items", prompt,
+                            f"turn the action items of {epic.name} into tickets")]
+    if retro.word == "rejected":
+        _, prompt, _ = resume_action(epic)
+        return [make_action("fix", prompt, f"address the rejected retro of {epic.name}")]
+    return []
+
+
 def count_word(word: str) -> str:
     """The word a ticket is counted under: every `waits on ...` is `waiting`."""
     return "waiting" if word.startswith(WAITS_ON) else word

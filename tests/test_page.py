@@ -1,6 +1,7 @@
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import unquote
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.page import relative_time, render_page
@@ -861,3 +862,111 @@ def test_no_worktree_statuses_keep_built_green_blocked_warm_rest_grey():
     for word, css_class in expected.items():
         html = ticket_action_html(word, ready=True, worktrees=False)
         assert html == f'<span role="cell" class="{css_class}">{word}</span>'
+
+
+# --- epic and retro actions ---
+
+def epic_item(word, name="epic-x", retro_word=None, tickets=()):
+    children = []
+    if retro_word is not None:
+        children.append(TreeItem("retro", f"{name}-retrospective",
+                                 f"initiative-a/{name}/{name}-retrospective.md",
+                                 None, "finished", word=retro_word))
+    return TreeItem("epic", name, f"initiative-a/{name}/{name}.md", None, "open",
+                    children=children, tickets=list(tickets), word=word)
+
+
+def item_cells(item, worktrees=True):
+    wts = [Worktree(WT, "main")] if worktrees else []
+    html = render([Initiative("initiative-a", "A", wts, tree=[item])])
+    cells = []
+    for row in rows_of(html)[1:]:
+        end = re.search(r"</(?:a|span)></span>", row).end()
+        after = row[end:]
+        cells.append(after[:after.index('<span role="cell" class="upd"')])
+    return cells
+
+
+def hrefs(cell_html):
+    return [unquote(h.replace("&amp;", "&").split("q=", 1)[1])
+            for h in re.findall(r'href="(claude://[^"]+)"', cell_html)]
+
+
+def test_to_close_epic_is_one_close_link():
+    html = item_cells(epic_item("to close", "epic-dashboard"))[0]
+    assert html == (
+        f'<span role="cell"><a class="st-link" href="claude://code/new?{FOLDER}'
+        '&amp;q=%2Fbmad-ticket%20Close%20epic-dashboard" '
+        'aria-label="close: close epic-dashboard in a new session">close</a></span>')
+
+
+def test_not_started_epic_has_start_and_auto():
+    html = item_cells(epic_item("not started", "epic-several-projects"))[0]
+    assert ">start</a>" in html and ">auto</a>" in html
+    assert 'class="sep">·</span>' in html
+    start, auto = hrefs(html)
+    assert start == "/bmad Start work on epic-several-projects"
+    assert auto.startswith("/loop Build epic-several-projects unattended")
+    assert auto.endswith("Stop for no other reason.")
+
+
+def test_in_progress_epic_has_resume_and_auto_and_addresses_rejected_retro():
+    html = item_cells(epic_item("in progress"))[0]
+    assert ">resume</a>" in html and ">auto</a>" in html
+    assert hrefs(html)[0] == "/bmad Resume work on epic-x"
+    rejected = item_cells(epic_item("in progress", retro_word="rejected"))[0]
+    assert hrefs(rejected)[0] == (
+        "/bmad Resume work on epic-x: address _bmad-output/initiative-a/epic-x/epic-x-retrospective.md")
+
+
+def test_to_retro_epic_has_retro_only():
+    html = item_cells(epic_item("to retro"))[0]
+    assert hrefs(html) == ["/bmad-retrospective epic-x"]
+    assert 'aria-label="retro: run the retrospective for epic-x in a new session"' in html
+    assert "auto" not in html
+
+
+def test_close_with_built_ticket_names_the_retro():
+    built = Ticket("1.1", "T", "built", None, None, False)
+    html = item_cells(epic_item("to close", retro_word="accepted", tickets=[built]))[0]
+    assert hrefs(html) == [
+        "/bmad-ticket Close epic-x: mark its built tickets done, per "
+        "_bmad-output/initiative-a/epic-x/epic-x-retrospective.md"]
+    no_retro = item_cells(epic_item("to close", tickets=[built]))[0]
+    assert hrefs(no_retro) == ["/bmad-ticket Close epic-x"]
+
+
+def test_done_dropped_and_empty_epics_are_statuses():
+    for word in ("done", "dropped"):
+        assert item_cells(epic_item(word))[0] == f'<span role="cell" class="st-muted">{word}</span>'
+    assert item_cells(epic_item(""))[0] == '<span role="cell"></span>'
+
+
+def test_retro_open_items_shows_plan_items():
+    html = item_cells(epic_item("to close", retro_word="open items"))[1]
+    assert hrefs(html) == [
+        "/bmad-ticket Turn the action items in "
+        "_bmad-output/initiative-a/epic-x/epic-x-retrospective.md into tickets"]
+    assert ">plan items</a>" in html and 'class="st-link"' in html
+
+
+def test_retro_rejected_shows_fix_with_the_resume_prompt():
+    html = item_cells(epic_item("in progress", retro_word="rejected"))[1]
+    assert ">fix</a>" in html
+    assert hrefs(html) == [
+        "/bmad Resume work on epic-x: address "
+        "_bmad-output/initiative-a/epic-x/epic-x-retrospective.md"]
+
+
+def test_retro_accepted_or_empty_is_a_status():
+    assert item_cells(epic_item("to close", retro_word="accepted"))[1] == (
+        '<span role="cell" class="st-muted">accepted</span>')
+    assert item_cells(epic_item("to close", retro_word=""))[1] == '<span role="cell"></span>'
+
+
+def test_no_epic_or_retro_link_without_worktree():
+    for word in ("not started", "in progress", "to retro", "to close"):
+        for html in item_cells(epic_item(word, retro_word="rejected"), worktrees=False):
+            assert "<a " not in html
+    assert item_cells(epic_item("to retro", retro_word="open items"), worktrees=False)[1] == (
+        '<span role="cell" class="st-muted">open items</span>')

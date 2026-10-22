@@ -24,7 +24,9 @@ from bmad_dash.rules import (
     WARM,
     action_prompt,
     by_activity,
+    epic_actions,
     is_stale,
+    retro_actions,
     status_parts,
     ticket_action,
     tree_shows_stale,
@@ -86,7 +88,7 @@ def name_cell(
 
 def word_cell(word: str, ready: bool = False, status_only: bool = False) -> str:
     """One status word, coloured by `word_class`; `ready` is a ticket's.
-    `status_only` (epics, until they get actions) is always grey."""
+    `status_only` is always grey."""
     if not word:
         return '<span role="cell"></span>'
     css_class = MUTED if status_only else word_class(word, ready)
@@ -126,6 +128,22 @@ def ticket_cell(ticket: Ticket, worktree: Worktree | None) -> str:
     return f'<span role="cell">{link}</span>'
 
 
+def item_cell(item: TreeItem, epic: TreeItem | None, worktree: Worktree | None) -> str:
+    """An epic's or retro's actions as links split by `SEP` when the initiative
+    has a worktree and there are any, else its word as a grey status."""
+    actions = []
+    if worktree is not None:
+        if item.kind == "epic":
+            actions = epic_actions(item)
+        elif item.kind == "retro" and epic is not None:
+            actions = retro_actions(item, epic)
+    if not actions:
+        return word_cell(item.word, status_only=True)
+    links = [action_link(worktree, prompt, text, LINK, label)
+             for text, prompt, label in actions]
+    return f'<span role="cell">{SEP.join(links)}</span>'
+
+
 def ticket_row(
     ticket: Ticket,
     depth: int,
@@ -147,6 +165,7 @@ def item_rows(
     now: datetime,
     show_stale: bool,
     worktree: Worktree | None = None,
+    epic: TreeItem | None = None,
 ) -> list[str]:
     """The item's row, then its children's, then its tickets'. With
     `show_stale` off, no row gets a stale tag.
@@ -157,13 +176,13 @@ def item_rows(
     rows = [tree_row(
         item.kind,
         name_cell(item.name, item.path, depth, item.report, item.report_label),
-        word_cell(item.word, status_only=True),
+        item_cell(item, epic, worktree),
         updated_cell(item.updated, show_stale and item.state == STALE, now),
     )]
     specs = [child for child in item.children if child.kind == "spec"]
     nest_under = specs[0] if len(specs) == 1 else None
     for child in item.children:
-        rows += item_rows(child, depth + 1, now, show_stale, worktree)
+        rows += item_rows(child, depth + 1, now, show_stale, worktree, item)
         if child is nest_under:
             rows += [ticket_row(t, depth + 2, now, show_stale, worktree) for t in item.tickets]
     if nest_under is None:
