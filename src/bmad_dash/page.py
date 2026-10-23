@@ -2,7 +2,7 @@
 
 The page is a server-rendered ARIA grid. Each initiative is one row of five
 cells, with its tree as a full-width panel under it. The only script opens
-and closes panels and remembers which ones are open.
+and closes panels, reveals closed tickets, and remembers which panels are open.
 
 What a row says comes from `rules.py`; this module only turns it into HTML.
 The CSS and JS live in `assets/` and are inlined.
@@ -21,20 +21,20 @@ from bmad_dash.prs import PullRequest
 from bmad_dash.rules import (
     LINK,
     MUTED,
-    WARM,
     StatusItem,
+    action_css,
     action_prompt,
     by_activity,
-    epic_actions,
     is_stale,
-    retro_actions,
+    item_actions,
+    item_word,
+    resume_prompt,
     status_class,
     status_parts,
     ticket_action,
     tree_shows_stale,
-    word_class,
 )
-from bmad_dash.tree import STALE, Ticket, TreeItem
+from bmad_dash.tree import CLOSED_STATES, STALE, Ticket, TreeItem
 
 
 def display_path(path: Path) -> str:
@@ -88,13 +88,11 @@ def name_cell(
     return f'<span role="cell" class="t-name d{depth}">{inner}</span>'
 
 
-def word_cell(word: str, ready: bool = False, status_only: bool = False) -> str:
-    """One status word, coloured by `word_class`; `ready` is a ticket's.
-    `status_only` is always grey."""
+def word_cell(word: str) -> str:
+    """One status word, always grey."""
     if not word:
         return '<span role="cell"></span>'
-    css_class = MUTED if status_only else word_class(word, ready)
-    return f'<span role="cell" class="{css_class}">{escape(word)}</span>'
+    return f'<span role="cell" class="{MUTED}">{escape(word)}</span>'
 
 
 def updated_cell(updated: datetime | None, stale: bool, now: datetime) -> str:
@@ -121,7 +119,7 @@ def ticket_cell(ticket: Ticket, worktree: Worktree | None) -> str:
     if worktree is None or action is None:
         css_class = status_class(ticket.word)
         return f'<span role="cell" class="{css_class}">{escape(ticket.word)}</span>'
-    css_class = WARM if action == "unblock" else LINK
+    css_class = action_css(action)
     label = f"{action} {ticket.ref} {ticket.title}"
     link = action_link(worktree, action_prompt(ticket, action), action, css_class, label)
     return f'<span role="cell">{link}</span>'
@@ -130,14 +128,9 @@ def ticket_cell(ticket: Ticket, worktree: Worktree | None) -> str:
 def item_cell(item: TreeItem, epic: TreeItem | None, worktree: Worktree | None) -> str:
     """An epic's or retro's actions as links split by `SEP` when the initiative
     has a worktree and there are any, else its word as a grey status."""
-    actions = []
-    if worktree is not None:
-        if item.kind == "epic":
-            actions = epic_actions(item)
-        elif item.kind == "retro" and epic is not None:
-            actions = retro_actions(item, epic)
+    actions = item_actions(item, epic) if worktree is not None else []
     if not actions:
-        return word_cell(item.word, status_only=True)
+        return word_cell(item_word(item, epic))
     links = [action_link(worktree, prompt, text, LINK, label)
              for text, prompt, label in actions]
     return f'<span role="cell">{SEP.join(links)}</span>'
@@ -158,9 +151,6 @@ def ticket_row(
     )
 
 
-CLOSED = ("done", "dropped")
-
-
 def closed_ticket_rows(
     tickets: list[Ticket],
     depth: int,
@@ -173,8 +163,8 @@ def closed_ticket_rows(
     one button row that shows them. No button when none is closed. Each
     part keeps the tickets' order."""
     open_rows = [ticket_row(t, depth, now, show_stale, worktree)
-                 for t in tickets if t.word not in CLOSED]
-    closed = [t for t in tickets if t.word in CLOSED]
+                 for t in tickets if t.word not in CLOSED_STATES]
+    closed = [t for t in tickets if t.word in CLOSED_STATES]
     if not closed:
         return open_rows
     count = len(closed)
@@ -345,13 +335,16 @@ TICKETS_FAILED = "Couldn't read tickets: tickets.py failed"
 
 def status_item(item: StatusItem, worktree: Worktree | None, panel_id: str | None) -> str:
     """A count as a span; a doc action as a link with a worktree, else its old
-    word as a grey status; `+n` as a button that opens the row's tree."""
+    word as a grey status; `+n` as a button that opens the row's tree, or a
+    grey span when there is none."""
     if item.action is not None:
         if worktree is None:
             return f'<span class="{MUTED}">{escape(item.fallback)}</span>'
         text, prompt, label = item.action
         return action_link(worktree, prompt, text, item.css_class, label)
-    if item.text.startswith("+") and panel_id is not None:
+    if item.text.startswith("+"):
+        if panel_id is None:  # no tree to open: inert
+            return f'<span class="{MUTED}">{escape(item.text)}</span>'
         return (
             f'<button type="button" class="more {item.css_class}"'
             f' data-open-panel="{panel_id}">{escape(item.text)}</button>'
@@ -398,8 +391,8 @@ def action_link(
 
 
 def resume_link(worktree: Worktree, slug: str) -> str:
-    label = f"Resume work on {slug}"
-    return action_link(worktree, f"/bmad Resume work on {slug}", "Resume", "btn btn-1", label)
+    prompt = resume_prompt(slug)
+    return action_link(worktree, prompt, "Resume", "btn btn-1", prompt.removeprefix("/bmad "))
 
 
 # GitHub's 16px octicons, path data from @primer/octicons 19.15.0 (MIT).

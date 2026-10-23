@@ -6,7 +6,14 @@ from urllib.parse import quote, unquote
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.page import relative_time, render_page
 from bmad_dash.prs import PullRequest
-from bmad_dash.rules import doc_actions, waiting_items
+from bmad_dash.rules import (
+    action_css,
+    doc_actions,
+    item_actions,
+    resume_prompt,
+    retro_word,
+    waiting_items,
+)
 from bmad_dash.signals import Activity
 from bmad_dash.tree import Ticket, TreeItem
 
@@ -973,6 +980,41 @@ def test_finished_epics_retro_is_a_grey_status():
         assert html == f'<span role="cell" class="st-muted">{word}</span>'
 
 
+def test_finished_epics_retro_open_items_reads_accepted_in_the_cell():
+    for state in ("done", "dropped"):
+        html = item_cells(epic_item(state, retro_word="open items", state="finished"))[1]
+        assert html == '<span role="cell" class="st-muted">accepted</span>'
+
+
+def test_retro_word_open_items_is_accepted_only_under_a_finished_epic():
+    done = epic_item("done", retro_word="open items", state="finished")
+    open_epic = epic_item("in progress", retro_word="open items")
+    assert retro_word(done.children[0], done) == "accepted"
+    assert retro_word(open_epic.children[0], open_epic) == "open items"
+    rejected = epic_item("done", retro_word="rejected", state="finished")
+    assert retro_word(rejected.children[0], rejected) == "rejected"
+
+
+def test_item_actions_by_kind():
+    epic = epic_item("to retro", retro_word="open items")
+    retro = epic.children[0]
+    assert item_actions(epic, None) == item_actions(epic, epic) != []
+    assert [a[0] for a in item_actions(retro, epic)] == ["plan items"]
+    assert item_actions(retro, None) == []
+    doc = TreeItem("doc", "d", "p", None, "open")
+    assert item_actions(doc, epic) == []
+
+
+def test_action_css_unblock_is_warm_else_blue():
+    assert action_css("unblock") == "st-warm"
+    for action in ("start", "resume", "fix"):
+        assert action_css(action) == "st-link"
+
+
+def test_resume_prompt():
+    assert resume_prompt("epic-x") == "/bmad Resume work on epic-x"
+
+
 def test_no_epic_or_retro_link_without_worktree():
     for word in ("not started", "in progress", "to retro", "to close"):
         for html in item_cells(epic_item(word, retro_word="rejected"), worktrees=False):
@@ -1070,10 +1112,12 @@ def test_plus_n_is_a_button_that_targets_the_panel_without_a_worktree():
     assert 'id="panel-0"' in render([signals_initiative(tickets)])
 
 
-def test_plus_n_is_plain_text_without_a_panel():
+def test_plus_n_is_a_grey_span_without_a_panel():
     initiative = Initiative("initiative-a", "A", [],
                             tickets=[{"state": "backlog"}, {"state": "planned"}, {"state": "stuck"}])
-    assert '<span class="st-link">+1</span>' in status_of(initiative)
+    status = status_of(initiative)
+    assert '<span class="st-muted">+1</span>' in status
+    assert "data-open-panel" not in status and "<button" not in status
 
 
 # --- closed tickets behind a button ---

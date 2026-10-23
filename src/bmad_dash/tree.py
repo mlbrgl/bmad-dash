@@ -13,8 +13,9 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
   `epics`); folders not listed there follow, by name. Without it, all by name.
 - Retro: `epic-<slug>-retrospective.md` in an epic folder, first under its epic.
   Its word is its frontmatter `verdict` (`accepted`, `open items` for
-  `accepted-with-open-items`, `rejected`), else none. Under a finished epic,
-  `open items` reads `accepted`. A doc: never open, never stale.
+  `accepted-with-open-items`, `rejected`), else none. A doc: never open,
+  never stale. (Under a finished epic the page shows `open items` as
+  `accepted`: `retro_word` in rules.py.)
 - Epic word: `dropped` whenever its file says so (and it has tickets), even
   with open tickets. Else, while any ticket is open (first match): `to close` (every ticket
   finished and a current retro `accepted` or `open items`), `to retro` (every
@@ -46,6 +47,8 @@ STALE_AFTER = timedelta(days=14)
 
 # Ticket states that mean work has begun.
 STARTED_STATES = ("in-progress", "review", "done")
+# A ticket or epic in one of these is closed.
+CLOSED_STATES = ("done", "dropped")
 
 OPEN = "open"
 FINISHED = "finished"
@@ -292,7 +295,7 @@ def ticket_word(raw: dict, next_info: NextInfo | None = None) -> str:
     `waits on <refs>`, `built`, `in review`, the state word.
     Without `next_info` nothing waits."""
     state = ticket_state(raw)
-    if state in ("done", "dropped"):
+    if state in CLOSED_STATES:
         return state
     if raw.get("status") == "blocked" or raw.get("blocked_at"):
         return "blocked"
@@ -445,9 +448,9 @@ def epic_word(raw_tickets: list[dict], file_status: str, retro: TreeItem | None)
         return ""
     if file_status == "dropped":
         return "dropped"
-    if all(ticket_state(t) in ("done", "dropped") for t in raw_tickets):
-        return file_status if file_status in ("done", "dropped") else "to close"
-    if all(ticket_state(t) in ("done", "dropped") or t.get("status") == "built"
+    if all(ticket_state(t) in CLOSED_STATES for t in raw_tickets):
+        return file_status if file_status in CLOSED_STATES else "to close"
+    if all(ticket_state(t) in CLOSED_STATES or t.get("status") == "built"
            for t in raw_tickets):
         current = retro is not None and retro.current
         if current and retro.word in ("accepted", "open items"):
@@ -493,7 +496,7 @@ def make_ticket(
     updated = file_mtime(file) if file else file_mtime(folder / "tickets.toml")
 
     state = ticket_state(raw)
-    open_ticket = state not in ("done", "dropped")
+    open_ticket = state not in CLOSED_STATES
     ref = str(raw.get("ref") or "")
     return Ticket(
         ref=ref,
@@ -523,24 +526,18 @@ def epic_item(
             newest_plan is None or retro.updated >= newest_plan)
     children = retros + doc_items(folder, output_dir, now, last_commit)
     file_status = frontmatter(folder / f"{folder.name}.md").get("status", "")
-    state = FINISHED if file_status in ("done", "dropped") else OPEN
+    state = FINISHED if file_status in CLOSED_STATES else OPEN
 
     if tickets is None:
         epic_tickets = []
         word = ""
     else:
         raw_tickets = [t for t in tickets if t.get("epic") == folder.name]
-        if any(ticket_state(t) not in ("done", "dropped") for t in raw_tickets):
+        if any(ticket_state(t) not in CLOSED_STATES for t in raw_tickets):
             state = OPEN
         word = epic_word(raw_tickets, file_status, retros[0] if retros else None)
         plans = plans_by_ticket(folder)
         epic_tickets = [make_ticket(t, folder, output_dir, plans, now, next_info) for t in raw_tickets]
-
-    # Closing the epic settled its retro's open items.
-    if state == FINISHED:
-        for retro in retros:
-            if retro.word == "open items":
-                retro.word = "accepted"
 
     return TreeItem(
         kind="epic",

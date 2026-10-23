@@ -13,8 +13,10 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
   first (every `waits on ...` counts as `waiting`), then any other word in the
   order it first appears. Without a worktree an action shows its old word
   (`FALLBACK_WORDS`) as a grey status.
-- Words have four colours (`word_class`): blue to act, green built, grey
-  (the default) nothing to do, warm blocked.
+- Statuses have three colours (`status_class`): green built, grey (the
+  default) nothing to do, warm blocked. Actions are blue, warm for `unblock`
+  (`action_css`).
+- A retro's `open items` reads `accepted` under a finished epic (`retro_word`).
 - A finished initiative's tree shows no stale tags.
 - The PR button shows the PR of the highest branch that has one, in the
   stack starting at the row's branch (Stack's last PR). With Graphite, the
@@ -36,6 +38,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from bmad_dash.prs import PullRequest, last_pr
 from bmad_dash.tree import (
+    CLOSED_STATES,
     FINISHED,
     Ticket,
     TreeItem,
@@ -76,24 +79,6 @@ def has_open(items: list[TreeItem], kind: str) -> bool:
         (item.kind == kind and item.state != FINISHED) or has_open(item.children, kind)
         for item in items
     )
-
-
-# Words that read blue: ticket words with an action.
-LINK_WORDS = {"in progress", "in review", "no state"}
-
-
-def word_class(word: str, ready: bool = False) -> str:
-    """The colour class of a status word. Grey is the default; blue for
-    `LINK_WORDS`, and for `planned` / `backlog` when `ready` to start."""
-    if word == "blocked":
-        return WARM
-    if word == "built":
-        return BUILT
-    if word in ("planned", "backlog"):
-        return LINK if ready else MUTED
-    if word in LINK_WORDS:
-        return LINK
-    return MUTED
 
 
 def ticket_action(ticket: Ticket) -> str | None:
@@ -153,10 +138,15 @@ def make_action(text: str, prompt: str, step: str) -> Action:
     return (text, prompt, f"{text}: {step} in a new session")
 
 
+def resume_prompt(slug: str) -> str:
+    """The prompt that resumes work on an epic or initiative."""
+    return f"/bmad Resume work on {slug}"
+
+
 def resume_action(epic: TreeItem) -> Action:
     """`resume`; after a current rejected retro it also says to address it."""
     retro = epic_retro(epic)
-    prompt = f"/bmad Resume work on {epic.name}"
+    prompt = resume_prompt(epic.name)
     step = f"resume work on {epic.name}"
     if retro is not None and retro.word == "rejected" and retro.current and retro.path:
         prompt += f": address {output_path(retro.path)}"
@@ -201,6 +191,36 @@ def retro_actions(retro: TreeItem, epic: TreeItem) -> list[Action]:
     return []
 
 
+def retro_word(retro: TreeItem, epic: TreeItem) -> str:
+    """The word a retro's cell shows: `open items` reads `accepted` under a
+    finished epic (closing it settled them), else the retro's own word."""
+    if retro.word == "open items" and epic.state == FINISHED:
+        return "accepted"
+    return retro.word
+
+
+def item_word(item: TreeItem, epic: TreeItem | None) -> str:
+    """The word an epic's or retro's cell shows as a status."""
+    if item.kind == "retro" and epic is not None:
+        return retro_word(item, epic)
+    return item.word
+
+
+def action_css(action: str) -> str:
+    """The colour of an action link: `unblock` warm, every other blue."""
+    return WARM if action == "unblock" else LINK
+
+
+def item_actions(item: TreeItem, epic: TreeItem | None) -> list[Action]:
+    """The actions an epic's or retro's cell offers: an epic's own, a retro's
+    (needs its epic), else none."""
+    if item.kind == "epic":
+        return epic_actions(item)
+    if item.kind == "retro" and epic is not None:
+        return retro_actions(item, epic)
+    return []
+
+
 def count_word(word: str) -> str:
     """The word a ticket is counted under: every `waits on ...` is `waiting`."""
     return "waiting" if word.startswith(WAITS_ON) else word
@@ -221,7 +241,7 @@ def waiting_items(initiative: Initiative) -> list[tuple[str, str]]:
     counts: dict[str, int] = {}
     for ticket in initiative.tickets:
         word = ticket_word(ticket, initiative.next_info)
-        if word in ("done", "dropped"):
+        if word in CLOSED_STATES:
             continue
         key = count_word(word)
         counts[key] = counts.get(key, 0) + 1

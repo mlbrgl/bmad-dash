@@ -10,7 +10,6 @@ import pytest
 from conftest import write_config
 from bmad_dash.initiatives import list_initiatives, read_title
 from bmad_dash.page import render_page
-from bmad_dash.rules import word_class
 from bmad_dash.signals import last_bullet
 from bmad_dash.tree import (
     FINISHED,
@@ -582,35 +581,19 @@ def test_retro_is_never_stale(initiative):
     assert retro.updated == NOW - timedelta(days=60)
 
 
-@pytest.mark.parametrize("status", ["done", "dropped"])
-def test_finished_epics_retro_with_open_items_reads_accepted(initiative, status):
-    epic = make_folder(initiative, "epic-x")
-    set_epic_status(epic, status)
-    write_retro(epic, "accepted-with-open-items")
-    item = only(build_tree(initiative, [ticket("1.1", "done")], NOW))
-    assert item.state == FINISHED
-    assert only(item.children).word == "accepted"
-
-
-@pytest.mark.parametrize("status, state", [("", "done"), ("done", "in-progress")])
-def test_open_epics_retro_with_open_items_keeps_them(initiative, status, state):
+@pytest.mark.parametrize("status, state", [("", "done"), ("done", "in-progress"), ("done", "done")])
+def test_retro_keeps_its_verdict_word(initiative, status, state):
     epic = make_folder(initiative, "epic-x")
     if status:
         set_epic_status(epic, status)
     write_retro(epic, "accepted-with-open-items")
     item = only(build_tree(initiative, [ticket("1.1", state)], NOW))
-    assert item.state != FINISHED
     assert only(item.children).word == "open items"
 
 
 def test_epic_without_retro_has_no_retro_row(initiative):
     make_folder(initiative, "epic-x")
     assert only(build_tree(initiative, [], NOW)).children == []
-
-
-@pytest.mark.parametrize("word", ["accepted", "open items", "rejected"])
-def test_retro_verdicts_read_grey(word):
-    assert word_class(word) == word_class("anything else")
 
 
 def test_read_memlog_ignores_bullets(tmp_path):
@@ -962,19 +945,6 @@ def test_ready_flag_and_words_reach_the_tree(initiative):
     top = initiative_tickets(initiative, [ticket("1", "planned", "initiative-x")], NOW,
                              NextInfo(waiting={}, ready={"1"}))
     assert only(top).ready is True
-
-
-def test_word_classes():
-    assert word_class("blocked") == "st-warm"
-    assert word_class("built") == "st-built"
-    assert word_class("in review") == "st-link"
-    assert word_class("in progress") == "st-link"
-    assert word_class("no state") == "st-link"
-    for word in ("done", "dropped", "waits on 3.10 +1", "waiting"):
-        assert word_class(word) == "st-muted"
-    assert word_class("planned", ready=True) == "st-link"
-    assert word_class("backlog") == "st-muted"
-    assert word_class("a word the rules never named") == "st-muted"
 
 
 def project_with_next(tmp_path: Path, tickets: list[dict], next_output: str, next_exit=0,

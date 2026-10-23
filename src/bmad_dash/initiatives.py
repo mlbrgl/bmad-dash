@@ -19,6 +19,7 @@ from bmad_dash import commands
 from bmad_dash.rules import claimed_branches, stack_tips
 from bmad_dash.signals import Activity, last_activity, worktree_commits
 from bmad_dash.tree import (
+    CLOSED_STATES,
     NextInfo,
     Ticket,
     TreeItem,
@@ -60,7 +61,7 @@ class Initiative:
 
     @property
     def finished(self) -> bool:
-        return self.status in ("done", "dropped")
+        return self.status in CLOSED_STATES
 
 
 def list_worktrees(root: Path) -> list[Worktree] | None:
