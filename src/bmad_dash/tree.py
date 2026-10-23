@@ -13,7 +13,8 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
   `epics`); folders not listed there follow, by name. Without it, all by name.
 - Retro: `epic-<slug>-retrospective.md` in an epic folder, first under its epic.
   Its word is its frontmatter `verdict` (`accepted`, `open items` for
-  `accepted-with-open-items`, `rejected`), else none. A doc: never open, never stale.
+  `accepted-with-open-items`, `rejected`), else none. Under a finished epic,
+  `open items` reads `accepted`. A doc: never open, never stale.
 - Epic word, while any ticket is open (first match): `to close` (every ticket
   finished and a current retro `accepted` or `open items`), `to retro` (every
   ticket finished, no current retro), `not started` (no ticket has a plan),
@@ -524,6 +525,12 @@ def epic_item(
                          newest_plan_mtime(folder))
         plans = plans_by_ticket(folder)
         epic_tickets = [make_ticket(t, folder, output_dir, plans, now, next_info) for t in raw_tickets]
+
+    # Closing the epic settled its retro's open items.
+    if state == FINISHED:
+        for retro in retros:
+            if retro.word == "open items":
+                retro.word = "accepted"
 
     return TreeItem(
         kind="epic",

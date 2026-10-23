@@ -866,13 +866,13 @@ def test_no_worktree_statuses_keep_built_green_blocked_warm_rest_grey():
 
 # --- epic and retro actions ---
 
-def epic_item(word, name="epic-x", retro_word=None, tickets=()):
+def epic_item(word, name="epic-x", retro_word=None, tickets=(), state="open"):
     children = []
     if retro_word is not None:
         children.append(TreeItem("retro", f"{name}-retrospective",
                                  f"initiative-a/{name}/{name}-retrospective.md",
                                  None, "finished", word=retro_word))
-    return TreeItem("epic", name, f"initiative-a/{name}/{name}.md", None, "open",
+    return TreeItem("epic", name, f"initiative-a/{name}/{name}.md", None, state,
                     children=children, tickets=list(tickets), word=word)
 
 
@@ -962,6 +962,12 @@ def test_retro_accepted_or_empty_is_a_status():
     assert item_cells(epic_item("to close", retro_word="accepted"))[1] == (
         '<span role="cell" class="st-muted">accepted</span>')
     assert item_cells(epic_item("to close", retro_word=""))[1] == '<span role="cell"></span>'
+
+
+def test_finished_epics_retro_is_a_grey_status():
+    for word in ["accepted", "rejected"]:
+        html = item_cells(epic_item("done", retro_word=word, state="finished"))[1]
+        assert html == f'<span role="cell" class="st-muted">{word}</span>'
 
 
 def test_no_epic_or_retro_link_without_worktree():

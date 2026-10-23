@@ -540,6 +540,27 @@ def test_retro_is_never_stale(initiative):
     assert retro.updated == NOW - timedelta(days=60)
 
 
+@pytest.mark.parametrize("status", ["done", "dropped"])
+def test_finished_epics_retro_with_open_items_reads_accepted(initiative, status):
+    epic = make_folder(initiative, "epic-x")
+    set_epic_status(epic, status)
+    write_retro(epic, "accepted-with-open-items")
+    item = only(build_tree(initiative, [ticket("1.1", "done")], NOW))
+    assert item.state == FINISHED
+    assert only(item.children).word == "accepted"
+
+
+@pytest.mark.parametrize("status, state", [("", "done"), ("done", "in-progress")])
+def test_open_epics_retro_with_open_items_keeps_them(initiative, status, state):
+    epic = make_folder(initiative, "epic-x")
+    if status:
+        set_epic_status(epic, status)
+    write_retro(epic, "accepted-with-open-items")
+    item = only(build_tree(initiative, [ticket("1.1", state)], NOW))
+    assert item.state != FINISHED
+    assert only(item.children).word == "open items"
+
+
 def test_epic_without_retro_has_no_retro_row(initiative):
     make_folder(initiative, "epic-x")
     assert only(build_tree(initiative, [], NOW)).children == []

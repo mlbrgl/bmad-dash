@@ -186,8 +186,9 @@ def epic_actions(epic: TreeItem) -> list[Action]:
 
 
 def retro_actions(retro: TreeItem, epic: TreeItem) -> list[Action]:
-    """The actions a retro's cell offers; [] means it shows a status."""
-    if not retro.path:
+    """The actions a retro's cell offers; [] means it shows a status.
+    A finished epic's retro needs nothing."""
+    if not retro.path or epic.state == FINISHED:
         return []
     if retro.word == "open items":
         prompt = f"/bmad-ticket Turn the action items in {output_path(retro.path)} into tickets"
