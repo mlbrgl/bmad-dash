@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -62,12 +63,14 @@ def validate_root(root: Path) -> str | None:
 
 def duplicate_names(roots: list[Path]) -> str | None:
     """An error message if two roots share a folder name, else None.
-    The folder name is the project name in every link, so it must be unique."""
+    The folder name is the project name in every link, so it must be unique.
+    Names differing only in case clash too: on macOS they are the same folder."""
     seen: dict[str, Path] = {}
     for root in roots:
-        if root.name in seen:
-            return f"{seen[root.name]} and {root} are both named {root.name}"
-        seen[root.name] = root
+        name = root.name.casefold()
+        if name in seen:
+            return f"{seen[name]} and {root} are both named {root.name}"
+        seen[name] = root
     return None
 
 
@@ -83,6 +86,19 @@ def load_root(root: Path) -> tuple[list[Initiative], dict[str, PullRequest] | No
         initiatives = list_initiatives(root, stack=stack)
         prs = stack_prs(root, initiatives, topology.result())
     return initiatives, prs
+
+
+def load_root_or_none(
+    root: Path,
+) -> tuple[list[Initiative], dict[str, PullRequest] | None] | None:
+    """`load_root`, or None when it raised. The traceback goes to stderr and
+    the page names the root, so one broken root never blanks the others."""
+    try:
+        return load_root(root)
+    except Exception:
+        print(f"bmad-dash: couldn't load {root}", file=sys.stderr)
+        traceback.print_exc()
+        return None
 
 
 def _run_code(args: list[str]) -> None:
@@ -146,7 +162,9 @@ def make_server(
             # independent, so they load in parallel: the page waits for the
             # slowest root, not the sum.
             with ThreadPoolExecutor(max_workers=len(roots)) as pool:
-                loaded = list(pool.map(load_root, roots))
+                results = list(pool.map(load_root_or_none, roots))
+            failed_roots = [root for root, result in zip(roots, results) if result is None]
+            loaded = [result for result in results if result is not None]
             initiatives = [i for root_initiatives, _ in loaded for i in root_initiatives]
             prs: dict[str, PullRequest] = {}
             for _, root_prs in loaded:
@@ -158,6 +176,7 @@ def make_server(
                 vscode_failed=vscode_failed,
                 prs=prs,
                 github_failed=github_failed,
+                failed_roots=failed_roots,
             ).encode("utf-8")
             self.send_html(body)
 

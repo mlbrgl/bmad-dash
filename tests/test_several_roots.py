@@ -248,3 +248,56 @@ def test_same_root_twice_exits(project):
     result = run_main("--project-root", str(project), "--project-root", str(project))
     assert result.returncode == 1
     assert "named project" in result.stderr
+
+
+def test_duplicate_names_ignore_case():
+    # On macOS ~/Code/Foo and ~/Code/foo are the same folder.
+    error = server_module.duplicate_names([Path("/a/Foo"), Path("/b/foo")])
+    assert error == "/a/Foo and /b/foo are both named foo"
+
+
+def test_case_variant_root_exits_naming_both(project):
+    variant = project.parent / project.name.upper()
+    if not variant.exists():
+        pytest.skip("case-sensitive file system: the variant is another folder")
+    result = run_main("--project-root", str(project), "--project-root", str(variant))
+    assert result.returncode == 1
+    assert str(project) in result.stderr and str(variant.resolve()) in result.stderr
+
+
+def test_root_that_fails_to_load_leaves_the_others(project, other, serve, monkeypatch, capfd):
+    real = server_module.load_root
+
+    def load_root(root):
+        if root == other:
+            raise OSError("boom")
+        return real(root)
+
+    monkeypatch.setattr(server_module, "load_root", load_root)
+    html = get_page(serve([project, other]))
+    assert "project · initiative-matched" in rows(html)
+    assert not [row for row in rows(html) if row.startswith("other · ")]
+    assert html.count("Couldn't load") == 1
+    assert f"Couldn't load <code>{other}</code>" in html
+    err = capfd.readouterr().err
+    assert f"bmad-dash: couldn't load {other}" in err and "OSError: boom" in err
+
+
+def test_failed_root_is_left_out_of_the_empty_state():
+    html = render_page([], [Path("/r/a"), Path("/r/b")], now=NOW,
+                       failed_roots=[Path("/r/b")])
+    assert "No initiatives in <code>/r/a/_bmad-output/</code>" in html
+    assert "No initiatives in <code>/r/b" not in html
+    assert "Couldn't load <code>/r/b</code>" in html
+
+
+def test_vscode_failed_names_one_project_when_slugs_match():
+    html = render_page(
+        [initiative("project", "initiative-x", 1), initiative("other", "initiative-x", 2)],
+        [Path("/r/project"), Path("/r/other")],
+        now=NOW,
+        vscode_failed="other/initiative-x",
+    )
+    assert html.count("Couldn't open VS Code") == 1
+    other_row = html.split("other · initiative-x")[1].split('role="row"')[0]
+    assert "Couldn't open VS Code" in other_row

@@ -8,7 +8,7 @@ What a row says comes from `rules.py`; this module only turns it into HTML.
 The CSS and JS live in `assets/` and are inlined.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -412,6 +412,7 @@ PR_ICONS = {
     "closed": "M3.25 1A2.25 2.25 0 0 1 4 5.372v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.251 2.251 0 0 1 3.25 1Zm9.5 5.5a.75.75 0 0 1 .75.75v3.378a2.251 2.251 0 1 1-1.5 0V7.25a.75.75 0 0 1 .75-.75Zm-2.03-5.273a.75.75 0 0 1 1.06 0l.97.97.97-.97a.748.748 0 0 1 1.265.332.75.75 0 0 1-.205.729l-.97.97.97.97a.751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018l-.97-.97-.97.97a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734l.97-.97-.97-.97a.75.75 0 0 1 0-1.06ZM2.5 3.25a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM3.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm9.5 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z",
 }
 GITHUB_FAILED = "Couldn't reach GitHub"
+ROOT_FAILED = "Couldn't load"
 # Default `prs`: no row has a PR. Read-only, so safe as a default argument.
 NO_PRS: Mapping[str, PullRequest] = MappingProxyType({})
 
@@ -551,21 +552,28 @@ def render_page(
     vscode_failed: str = "",
     prs: Mapping[str, PullRequest] = NO_PRS,
     github_failed: bool = False,
+    failed_roots: Sequence[Path] = (),
 ) -> str:
     """The whole page for every root in `roots` (CLI order). `vscode_failed`
     is a `<project>/<slug>` from the URL; it only picks which row shows the
     failure message. `prs` maps an initiative key (`<project>/<slug>`) to the
     PR its row shows (from `stack.stack_prs`); a root GitHub couldn't reach
     has no keys there. `github_failed`: some root couldn't reach GitHub, so
-    the header says so."""
+    the header says so. `failed_roots` couldn't load at all: the header names
+    each, and the empty state leaves them out."""
     if now is None:
         now = datetime.now()
     roots_text = [escape(display_path(root)) for root in roots]
+    loaded_text = [escape(display_path(root)) for root in roots if root not in failed_roots]
     content = page_content(
-        by_activity(initiatives), roots_text, now, vscode_failed, prs
+        by_activity(initiatives), loaded_text, now, vscode_failed, prs
     )
     paths = "".join(f'<span class="path">{text}</span>' for text in roots_text)
-    github = f'<span class="err">{GITHUB_FAILED}</span>' if github_failed else ""
+    errors = f'<span class="err">{GITHUB_FAILED}</span>' if github_failed else ""
+    errors += "".join(
+        f'<span class="err">{ROOT_FAILED} <code>{escape(display_path(root))}</code></span>'
+        for root in failed_roots
+    )
     storage_key = "bmad-dash:open"
     # Colour tokens (from DESIGN.md frontmatter) first, then the page's own rules.
     style = assets.read("tokens.css") + assets.read("page.css")
@@ -583,7 +591,7 @@ def render_page(
 </head>
 <body>
 <main class="page" data-storage-key="{storage_key}">
-<header class="hdr"><h1>Initiatives</h1>{paths}{github}</header>
+<header class="hdr"><h1>Initiatives</h1>{paths}{errors}</header>
 {content}
 <script>
 {script}</script>
