@@ -21,6 +21,7 @@ from bmad_dash.files import (
     split_project,
 )
 from bmad_dash.initiatives import (
+    Initiative,
     initiative_worktree,
     list_initiatives,
     list_worktrees,
@@ -34,6 +35,7 @@ from bmad_dash.opener import (
     wrapper_page,
 )
 from bmad_dash.page import render_page
+from bmad_dash.prs import PullRequest
 from bmad_dash.stack import gt_stack, load_topology, stack_prs
 
 HOST = "127.0.0.1"
@@ -58,6 +60,31 @@ def validate_root(root: Path) -> str | None:
     return None
 
 
+def duplicate_names(roots: list[Path]) -> str | None:
+    """An error message if two roots share a folder name, else None.
+    The folder name is the project name in every link, so it must be unique."""
+    seen: dict[str, Path] = {}
+    for root in roots:
+        if root.name in seen:
+            return f"{seen[root.name]} and {root} are both named {root.name}"
+        seen[root.name] = root
+    return None
+
+
+def load_root(root: Path) -> tuple[list[Initiative], dict[str, PullRequest] | None]:
+    """One root's initiatives and PRs (None when GitHub couldn't be reached).
+    1. `gt state` once: the PR buttons and the initiatives' commits share it.
+    2. GitHub (remote check, maybe the user's PRs) loads while the
+       initiatives do, so initiatives never wait for gh.
+    3. The per-stack PR lookups need the initiatives, so they come last."""
+    stack = gt_stack(root)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        topology = pool.submit(load_topology, root, stack)
+        initiatives = list_initiatives(root, stack=stack)
+        prs = stack_prs(root, initiatives, topology.result())
+    return initiatives, prs
+
+
 def _run_code(args: list[str]) -> None:
     """Run `code <args>` with no shell and no output. Does not wait."""
     subprocess.Popen(
@@ -79,15 +106,16 @@ def default_open_file(path: Path, line: str) -> None:
 
 
 def make_server(
-    root: Path,
+    roots: list[Path],
     port: int,
     launch: Callable[[Path], None] = default_launch,
     open_file: Callable[[Path, str], None] = default_open_file,
 ) -> ThreadingHTTPServer:
-    """A server for `root` on 127.0.0.1:`port` (0 picks a free port).
-    `launch` opens a worktree and `open_file` opens one file; tests pass fakes."""
-    # Project name -> root. The name is the root folder's name; epic 2 adds entries.
-    projects = {root.name: root}
+    """A server for `roots` on 127.0.0.1:`port` (0 picks a free port).
+    Root names must be unique (`main` checks). `launch` opens a worktree and
+    `open_file` opens one file; tests pass fakes."""
+    # Project name -> root. The name is the root folder's name.
+    projects = {root.name: root for root in roots}
 
     class Handler(BaseHTTPRequestHandler):
         # Socket timeout for each connection (from StreamRequestHandler).
@@ -114,18 +142,22 @@ def make_server(
                 return
             # Only picks which row says "Couldn't open VS Code"; runs nothing.
             vscode_failed = parse_qs(url.query).get("vscode_failed", [""])[0]
-            # Built on each request so the page is always current.
-            # 1. `gt state` once: the PR buttons and the initiatives' commits share it.
-            # 2. GitHub (remote check, maybe the user's PRs) loads while the
-            #    initiatives do, so initiatives never wait for gh.
-            # 3. The per-stack PR lookups need the initiatives, so they come last.
-            stack = gt_stack(root)
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                topology = pool.submit(load_topology, root, stack)
-                initiatives = list_initiatives(root, stack=stack)
-                prs = stack_prs(root, initiatives, topology.result())
+            # Built on each request so the page is always current. Roots are
+            # independent, so they load in parallel: the page waits for the
+            # slowest root, not the sum.
+            with ThreadPoolExecutor(max_workers=len(roots)) as pool:
+                loaded = list(pool.map(load_root, roots))
+            initiatives = [i for root_initiatives, _ in loaded for i in root_initiatives]
+            prs: dict[str, PullRequest] = {}
+            for _, root_prs in loaded:
+                prs.update(root_prs or {})  # keys are `<project>/<slug>`: no clashes
+            github_failed = any(root_prs is None for _, root_prs in loaded)
             body = render_page(
-                initiatives, root, vscode_failed=vscode_failed, prs=prs
+                initiatives,
+                roots,
+                vscode_failed=vscode_failed,
+                prs=prs,
+                github_failed=github_failed,
             ).encode("utf-8")
             self.send_html(body)
 
@@ -364,20 +396,31 @@ def make_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Dashboard of a BMad project's initiatives."
+        description="Dashboard of BMad projects' initiatives."
     )
-    parser.add_argument("--project-root", required=True, type=Path)
+    parser.add_argument(
+        "--project-root",
+        required=True,
+        type=Path,
+        action="append",
+        help="a project to show; repeat for several",
+    )
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
-    root = args.project_root.expanduser().resolve()
-    error = validate_root(root)
-    if error:
-        print(f"bmad-dash: {error}", file=sys.stderr)
+    roots = [root.expanduser().resolve() for root in args.project_root]
+    errors = [error for error in map(validate_root, roots) if error]
+    duplicate = duplicate_names(roots)
+    if duplicate:
+        errors.append(duplicate)
+    if errors:
+        for error in errors:
+            print(f"bmad-dash: {error}", file=sys.stderr)
         sys.exit(1)
 
-    server = make_server(root, args.port)
-    print(f"bmad-dash serving {root} at http://{HOST}:{server.server_port}/", flush=True)
+    server = make_server(roots, args.port)
+    url = f"http://{HOST}:{server.server_port}/"
+    print(f"bmad-dash serving {', '.join(map(str, roots))} at {url}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

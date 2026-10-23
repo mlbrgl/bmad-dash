@@ -90,11 +90,11 @@ def initiatives() -> list[Initiative]:
     ]
 
 
-PRS = {"initiative-busy": PullRequest(42, "feature-busy", "main", "draft", "https://github.com/o/r/pull/42")}
+PRS = {"snapshot-root/initiative-busy": PullRequest(42, "feature-busy", "main", "draft", "https://github.com/o/r/pull/42")}
 
 
 def test_page_matches_golden_file():
-    html = render_page(initiatives(), ROOT, NOW, vscode_failed="snapshot-root/initiative-stale", prs=PRS)
+    html = render_page(initiatives(), [ROOT], NOW, vscode_failed="snapshot-root/initiative-stale", prs=PRS)
     if os.environ.get("UPDATE_SNAPSHOT") == "1":
         GOLDEN.parent.mkdir(exist_ok=True)
         GOLDEN.write_text(html, encoding="utf-8")
@@ -102,12 +102,12 @@ def test_page_matches_golden_file():
 
 
 def test_empty_page_says_no_initiatives():
-    html = render_page([], ROOT, NOW)
+    html = render_page([], [ROOT], NOW)
     assert '<p class="empty">No initiatives in <code>/tmp/snapshot-root/_bmad-output/</code>.</p>' in html
 
 
 def test_github_failure_shows_in_header():
-    html = render_page(initiatives(), ROOT, NOW, vscode_failed="snapshot-root/initiative-stale", prs=None)
+    html = render_page(initiatives(), [ROOT], NOW, vscode_failed="snapshot-root/initiative-stale", github_failed=True)
     expected = GOLDEN.read_text(encoding="utf-8")
     # Same page, but the header says GitHub failed and no row has a PR button.
     assert '<span class="err">Couldn\'t reach GitHub</span></header>' in html

@@ -103,7 +103,7 @@ def test_initiative_level_ticket_shows_in_tree_and_counts(project):
     assert orphan.tree == []
     assert [t.title for t in orphan.top_tickets] == ["Top one"]
 
-    html = render_page([orphan], project)
+    html = render_page([orphan], [project])
     assert "Top one" in html
     assert 'class="toggle"' in html  # only a top ticket, still a caret
     assert "0/1 done" in html

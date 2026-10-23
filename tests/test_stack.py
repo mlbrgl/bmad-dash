@@ -89,19 +89,19 @@ def fake(tmp_path, monkeypatch):
     return make
 
 
-def row(branch="a", slug="initiative-a", worktrees=None):
+def row(branch="a", slug="initiative-a", worktrees=None, project="proj"):
     if worktrees is None:
         worktrees = [Worktree(Path("/wt"), branch)]
-    return Initiative(slug, "A", worktrees)
+    return Initiative(slug, "A", worktrees, project=project)
 
 
 ROOT = Path("/root")
 
 
 def shown(rows):
-    """slug -> PR number, or None when GitHub failed."""
+    """Initiative key (`<project>/<slug>`) -> PR number, or None when GitHub failed."""
     result = stack_prs(ROOT, rows, load_topology(ROOT, gt_stack(ROOT)))
-    return None if result is None else {slug: pr.number for slug, pr in result.items()}
+    return None if result is None else {key: pr.number for key, pr in result.items()}
 
 
 # --- stack_branches ---
@@ -170,7 +170,7 @@ def test_gt_failures_give_none(fake, gt):
 
 def test_three_branch_stack_looks_up_every_branch_and_shows_highest_pr(fake):
     f = fake(by_head={"c": [pr_json(31, "c", base="b")]})
-    assert shown([row("a")]) == {"initiative-a": 31}
+    assert shown([row("a")]) == {"proj/initiative-a": 31}
     assert sorted(f.ran("gh")) == [[
         "gh", "pr", "list", "--head", head, "--state", "all", "--limit", "1",
         "--json", "number,headRefName,baseRefName,state,isDraft,url",
@@ -179,13 +179,13 @@ def test_three_branch_stack_looks_up_every_branch_and_shows_highest_pr(fake):
 
 def test_middle_of_stack_shows_top_pr(fake):
     fake(by_head={"c": [pr_json(31, "c", base="b")]})
-    assert shown([row("b")]) == {"initiative-a": 31}
+    assert shown([row("b")]) == {"proj/initiative-a": 31}
 
 
 def test_old_or_foreign_top_pr_is_found_by_head(fake):
     # Not among "my" PRs at all: the head lookup finds it anyway.
     f = fake(by_head={"c": [pr_json(3, "c", base="b")]}, mine=[])
-    assert shown([row("a")]) == {"initiative-a": 3}
+    assert shown([row("a")]) == {"proj/initiative-a": 3}
     assert not any("--author" in args for args in f.calls)
 
 
@@ -193,7 +193,7 @@ def test_closed_sibling_pr_is_not_a_fork(fake):
     fake(gt=gt_state([("a", "main"), ("b", "a")]),
          by_head={"b": [pr_json(12, "b", base="a")]},
          mine=[pr_json(12, "b", base="a"), pr_json(9, "x", base="a", state="CLOSED")])
-    assert shown([row("a")]) == {"initiative-a": 12}
+    assert shown([row("a")]) == {"proj/initiative-a": 12}
 
 
 def test_fork_gives_no_button_and_no_gh_call(fake):
@@ -205,13 +205,13 @@ def test_fork_gives_no_button_and_no_gh_call(fake):
 
 def test_untracked_branch_is_its_own_top(fake):
     f = fake(by_head={"lone": [pr_json(5, "lone")]})
-    assert shown([row("lone")]) == {"initiative-a": 5}
+    assert shown([row("lone")]) == {"proj/initiative-a": 5}
     assert [args[4] for args in f.ran("gh")] == ["lone"]
 
 
 def test_top_without_pr_shows_the_highest_branch_with_one(fake):
     fake(by_head={"a": [pr_json(7, "a")], "b": [pr_json(8, "b", base="a")]})
-    assert shown([row("a")]) == {"initiative-a": 8}
+    assert shown([row("a")]) == {"proj/initiative-a": 8}
 
 
 def test_no_pr_on_any_branch_is_no_button_not_a_failure(fake):
@@ -247,7 +247,7 @@ def test_rows_on_one_stack_each_get_their_own_pr(fake):
     f = fake(gt=gt_state([("a", "main"), ("b", "a")]),
              by_head={"a": [pr_json(7, "a")], "b": [pr_json(8, "b", base="a")]})
     rows = [row("a"), row("b", slug="initiative-b")]
-    assert shown(rows) == {"initiative-a": 7, "initiative-b": 8}
+    assert shown(rows) == {"proj/initiative-a": 7, "proj/initiative-b": 8}
     # Each distinct branch looked up once.
     assert sorted(args[4] for args in f.ran("gh")) == ["a", "b"]
 
@@ -257,14 +257,14 @@ def test_claimed_child_beside_a_free_one_is_a_stop_not_a_fork(fake):
     rows = [row("a"), row("b", slug="initiative-b")]
     fake(gt=gt, by_head={"a": [pr_json(7, "a")], "b": [pr_json(8, "b", base="a")],
                          "c": [pr_json(9, "c", base="a")]})
-    assert shown(rows) == {"initiative-a": 9, "initiative-b": 8}
+    assert shown(rows) == {"proj/initiative-a": 9, "proj/initiative-b": 8}
 
 
 def test_claimed_child_beside_a_free_one_without_pr_falls_back_to_own(fake):
     gt = gt_state([("a", "main"), ("b", "a"), ("c", "a")])
     rows = [row("a"), row("b", slug="initiative-b")]
     fake(gt=gt, by_head={"a": [pr_json(7, "a")], "b": [pr_json(8, "b", base="a")]})
-    assert shown(rows) == {"initiative-a": 7, "initiative-b": 8}
+    assert shown(rows) == {"proj/initiative-a": 7, "proj/initiative-b": 8}
 
 
 def test_without_claims_a_fork_is_still_a_fork(fake):
@@ -309,8 +309,8 @@ def test_fallback_walks_my_prs(fake, setup):
     rows = [row("a", "lone-or-stack"), row("m", "merged"), row("d", "draft"),
             row("f", "fork"), row("none", "no-pr"), row("detached", "detached")]
     result = stack_prs(ROOT, rows, load_topology(ROOT, gt_stack(ROOT)))
-    assert {slug: (pr.number, pr.state) for slug, pr in result.items()} == {
-        "lone-or-stack": (9, "open"), "merged": (4, "merged"), "draft": (5, "draft"),
+    assert {key: (pr.number, pr.state) for key, pr in result.items()} == {
+        "proj/lone-or-stack": (9, "open"), "proj/merged": (4, "merged"), "proj/draft": (5, "draft"),
     }
     assert not any("--head" in args for args in f.calls)
     if setup.get("tracked") is False:
@@ -327,7 +327,7 @@ def test_fallback_gh_failure_gives_none(fake, setup):
 def test_fallback_shared_stack_each_row_its_own_pr(fake, setup):
     fake(mine=[pr_json(7, "a"), pr_json(8, "b", base="a")], **setup)
     rows = [row("a"), row("b", slug="initiative-b")]
-    assert shown(rows) == {"initiative-a": 7, "initiative-b": 8}
+    assert shown(rows) == {"proj/initiative-a": 7, "proj/initiative-b": 8}
 
 
 def test_no_github_remote_runs_no_gh(fake):

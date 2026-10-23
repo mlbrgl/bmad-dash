@@ -157,12 +157,15 @@ def files_project(project: Path) -> Path:
 
 @pytest.fixture
 def serve():
-    """Start servers: `serve(root, **kwargs)` runs `make_server(root, 0, **kwargs)`
-    on a daemon thread and returns it. Every server is shut down at teardown."""
+    """Start servers: `serve(root, **kwargs)` runs `make_server([root], 0, **kwargs)`
+    on a daemon thread and returns it; `serve([a, b])` serves several roots.
+    Every server is shut down at teardown."""
     servers = []
 
-    def start(root: Path, **kwargs):
-        server = make_server(root, 0, **kwargs)
+    def start(roots: Path | list[Path], **kwargs):
+        if isinstance(roots, Path):
+            roots = [roots]
+        server = make_server(roots, 0, **kwargs)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         servers.append(server)
         return server

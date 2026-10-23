@@ -29,7 +29,7 @@ def render_page(initiatives, *args, **kwargs):
 
 
 def render(initiatives, root=Path("/root")):
-    return render_page(initiatives, root, now=NOW)
+    return render_page(initiatives, [root], now=NOW)
 
 
 def grid(html: str) -> str:
@@ -292,7 +292,7 @@ def test_tab_order_caret_worktree_resume_pr_tree():
     initiative = tree_initiative()
     initiative.worktrees = [Worktree(Path("/x/wt"), "b")]
     initiative.tree[0].path = "a/epic.md"
-    html = render_page([initiative], Path("/root"), now=NOW, prs={"initiative-a": pr(7, "b")})
+    html = render_page([initiative], [Path("/root")], now=NOW, prs={"proj/initiative-a": pr(7, "b")})
     row = html.split('<div class="init" role="row">')[1]
     order = [row.index(marker) for marker in
              ('class="toggle"', 'class="wt"', ">Resume<", ">#7<", 'class="name-link"')]
@@ -698,7 +698,7 @@ def test_failure_message_on_flagged_row_only():
         Initiative("initiative-a", "A", [Worktree(WT, "main")]),
         Initiative("initiative-b", "B", [Worktree(Path("/x/b"), "dev")]),
     ]
-    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="proj/initiative-b")
+    html = render_page(initiatives, [Path("/root")], now=NOW, vscode_failed="proj/initiative-b")
     assert html.count("Couldn't open VS Code") == 1
     worktrees = re.findall(r'<div class="c-wt" role="cell">(.*?)</div>', html)
     assert "Couldn't open VS Code" not in worktrees[0]
@@ -709,7 +709,7 @@ def test_failure_message_on_flagged_row_only():
 def test_failure_message_shows_even_without_worktree():
     # The worktree vanished between render and click.
     initiatives = [Initiative("initiative-a", "A", [])]
-    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="proj/initiative-a")
+    html = render_page(initiatives, [Path("/root")], now=NOW, vscode_failed="proj/initiative-a")
     assert cell(html, "c-wt") == (
         '<span class="muted">no worktree</span>'
         '<span class="err">Couldn\'t open VS Code</span>'
@@ -719,7 +719,7 @@ def test_failure_message_shows_even_without_worktree():
 
 def test_unknown_flag_shows_no_message():
     initiatives = [Initiative("initiative-a", "A", [Worktree(WT, "main")])]
-    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="nope")
+    html = render_page(initiatives, [Path("/root")], now=NOW, vscode_failed="nope")
     assert "Couldn't open VS Code" not in html
 
 
@@ -730,7 +730,7 @@ def test_exactly_one_script():
 
 def test_now_defaults_to_current_time():
     initiative = signals_initiative([], Activity(datetime.now(), "", "plan"))
-    html = render_page([initiative], Path("/root"))
+    html = render_page([initiative], [Path("/root")])
     assert ">just now<" in html
 
 
@@ -741,15 +741,18 @@ def pr(number, head, base="main", state="open"):
 
 
 def with_prs(prs, branch="b", worktrees=None):
-    """Render one row, initiative-a. `prs` maps slug -> PR, or None (GitHub failed)."""
+    """Render one row, proj/initiative-a. `prs` maps `<project>/<slug>` -> PR,
+    or None (GitHub failed: the header line and no PRs)."""
     if worktrees is None:
         worktrees = [Worktree(WT, branch)]
     initiative = Initiative("initiative-a", "A", worktrees)
-    return render_page([initiative], Path("/root"), now=NOW, prs=prs)
+    if prs is None:
+        return render_page([initiative], [Path("/root")], now=NOW, github_failed=True)
+    return render_page([initiative], [Path("/root")], now=NOW, prs=prs)
 
 
 def with_pr(pr_, **kwargs):
-    return with_prs({"initiative-a": pr_}, **kwargs)
+    return with_prs({"proj/initiative-a": pr_}, **kwargs)
 
 
 def test_pr_button_opens_lone_pr_in_new_tab():
@@ -1240,7 +1243,7 @@ def test_finished_epics_allow_initiative_close():
 
 def test_slug_line_names_the_project():
     initiative = Initiative("foo", "Foo", [], project="owid-grapher")
-    html = render_page_for([initiative], Path("/x/owid-grapher"), now=NOW)
+    html = render_page_for([initiative], [Path("/x/owid-grapher")], now=NOW)
     assert '<span class="slug">owid-grapher · foo</span>' in html
 
 
@@ -1248,7 +1251,7 @@ def test_closed_group_ids_differ_between_projects():
     def group_id(project):
         initiative = closed_initiative([tk("1.1", "done")])
         initiative.project = project
-        html = render_page_for([initiative], Path("/x"), now=NOW)
+        html = render_page_for([initiative], [Path("/x")], now=NOW)
         return re.search(r'aria-controls="(closed-[^"]*)"', html).group(1)
 
     assert group_id("one") != group_id("two")
@@ -1256,5 +1259,5 @@ def test_closed_group_ids_differ_between_projects():
 
 def test_vscode_form_names_the_project():
     initiative = Initiative("foo", "Foo", [Worktree(Path("/x"), "main")], project="owid-grapher")
-    html = render_page_for([initiative], Path("/x"), now=NOW)
+    html = render_page_for([initiative], [Path("/x")], now=NOW)
     assert '<input type="hidden" name="project" value="owid-grapher">' in html

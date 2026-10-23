@@ -763,7 +763,7 @@ def test_failing_tickets_py_shows_unavailable_on_page(tmp_path):
     make_folder(initiative, "epic-x")
     write_fake_tickets_py(root, "import sys\nsys.exit(1)\n")
 
-    html = render_page(list_initiatives(root, now=NOW), root)
+    html = render_page(list_initiatives(root, now=NOW), [root])
     assert "tickets unavailable" in html
 
 
@@ -777,7 +777,7 @@ def test_null_and_missing_state_read_as_no_state_in_tree_and_status(tmp_path):
     data = {"tickets": [{**ticket("1.1", "done"), "state": None}, no_state]}
     write_fake_tickets_py(root, f"print({json.dumps(json.dumps(data))})\n")
 
-    html = render_page(list_initiatives(root, now=NOW), root)
+    html = render_page(list_initiatives(root, now=NOW), [root])
     assert html.count('<span role="cell" class="st-muted">no state</span>') == 2
     assert '<span class="st-muted">2 no state</span>' in html
     assert "0/2 done" in html
@@ -980,7 +980,7 @@ def test_page_shows_words_colours_and_waiting_count(tmp_path):
     blocked = [{"ref": "1.3", "waiting_on": [2]}]
     root = project_with_next(
         tmp_path, tickets, next_json([{"ref": "1.2"}], blocked))
-    html = render_page(list_initiatives(root, now=NOW), root)
+    html = render_page(list_initiatives(root, now=NOW), [root])
     assert '<span role="cell" class="st-built">built</span>' in html
     # No worktree: ready `planned` is a status, grey.
     assert '<span role="cell" class="st-muted">planned</span>' in html
@@ -999,7 +999,7 @@ def test_failing_next_keeps_tree_and_counts_without_waits_or_ready(tmp_path):
     tickets = [{**ticket("1.1", "planned")}, {**ticket("1.2", "planned")},
                {**ticket("1.3", "done")}]
     root = project_with_next(tmp_path, tickets, "", next_exit=1)
-    html = render_page(list_initiatives(root, now=NOW), root)
+    html = render_page(list_initiatives(root, now=NOW), [root])
     assert html.count('<span role="cell" class="st-muted">planned</span>') == 2
     assert "waits on" not in html
     assert status_cell_of(html) == (
@@ -1015,19 +1015,19 @@ def test_failing_next_with_a_worktree_offers_no_start_but_ready_next_does(tmp_pa
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
     failing = project_with_next(tmp_path / "a", tickets, "", next_exit=1, worktree=True)
-    html = render_page(list_initiatives(failing, now=NOW), failing)
+    html = render_page(list_initiatives(failing, now=NOW), [failing])
     assert '<span role="cell" class="st-muted">planned</span>' in html
     assert "%2Fbmad-build%20" not in html  # no ticket `start` link
     ready = project_with_next(tmp_path / "b", tickets, next_json([{"ref": "1.1"}]),
                               worktree=True)
-    html = render_page(list_initiatives(ready, now=NOW), ready)
+    html = render_page(list_initiatives(ready, now=NOW), [ready])
     assert "%2Fbmad-build%201.1" in html
 
 
 def page_of(tmp_path, tickets, epic_setup):
     root = project_with_next(tmp_path, tickets, next_json(), worktree=True)
     epic_setup(root / "_bmad-output" / "initiative-x" / "epic-x")
-    return render_page(list_initiatives(root, now=NOW), root)
+    return render_page(list_initiatives(root, now=NOW), [root])
 
 
 def test_old_retro_shows_no_stale_tag(tmp_path):

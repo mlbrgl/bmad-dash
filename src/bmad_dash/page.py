@@ -447,7 +447,7 @@ def initiative_row(
     is_open: bool,
     now: datetime,
     vscode_failed: str = "",
-    prs: Mapping[str, PullRequest] | None = NO_PRS,
+    prs: Mapping[str, PullRequest] = NO_PRS,
 ) -> str:
     """One grid row. DOM order: the five cells, then the panel, so Tab runs
     caret -> worktree -> Resume -> PR -> tree links. CSS puts the panel on
@@ -459,7 +459,7 @@ def initiative_row(
         worktree_cell(initiative, vscode_failed),
         activity_cell(initiative, now),
         status_cell(initiative, now, panel_id if has_panel(initiative) else None),
-        actions_cell(initiative, prs.get(initiative.slug) if prs else None),
+        actions_cell(initiative, prs.get(initiative.key)),
     ]
     if has_panel(initiative):
         cells.append(panel_cell(initiative, panel_id, is_open, now))
@@ -493,16 +493,21 @@ def newest_index(initiatives: list[Initiative]) -> int | None:
 
 def page_content(
     initiatives: list[Initiative],
-    root_text: str,
+    roots_text: list[str],
     now: datetime,
     vscode_failed: str = "",
-    prs: Mapping[str, PullRequest] | None = NO_PRS,
+    prs: Mapping[str, PullRequest] = NO_PRS,
 ) -> str:
     """Unfinished rows in the table, finished ones behind Show finished (n).
-    `initiatives` come sorted; `root_text` is already escaped. `vscode_failed`
-    is the `<project>/<slug>` whose row shows "Couldn't open VS Code"."""
+    `initiatives` come sorted; `roots_text` are already escaped, in CLI order.
+    `vscode_failed` is the `<project>/<slug>` whose row shows "Couldn't open
+    VS Code"."""
     if not initiatives:
-        return f'<p class="empty">No initiatives in <code>{root_text}/_bmad-output/</code>.</p>'
+        # One line per root, so each project says it is empty.
+        return "\n".join(
+            f'<p class="empty">No initiatives in <code>{root_text}/_bmad-output/</code>.</p>'
+            for root_text in roots_text
+        )
 
     current = [i for i in initiatives if not i.finished]
     finished = [i for i in initiatives if i.finished]
@@ -541,22 +546,26 @@ def page_content(
 
 def render_page(
     initiatives: list[Initiative],
-    root: Path,
+    roots: list[Path],
     now: datetime | None = None,
     vscode_failed: str = "",
-    prs: Mapping[str, PullRequest] | None = NO_PRS,
+    prs: Mapping[str, PullRequest] = NO_PRS,
+    github_failed: bool = False,
 ) -> str:
-    """The whole page. `vscode_failed` is a `<project>/<slug>` from the URL; it only picks
-    which row shows the failure message. `prs` maps a slug to the PR its row
-    shows (from `stack.stack_prs`). It is None when GitHub couldn't be
-    reached: the header says so and no row gets a PR button."""
+    """The whole page for every root in `roots` (CLI order). `vscode_failed`
+    is a `<project>/<slug>` from the URL; it only picks which row shows the
+    failure message. `prs` maps an initiative key (`<project>/<slug>`) to the
+    PR its row shows (from `stack.stack_prs`); a root GitHub couldn't reach
+    has no keys there. `github_failed`: some root couldn't reach GitHub, so
+    the header says so."""
     if now is None:
         now = datetime.now()
-    root_text = escape(display_path(root))
+    roots_text = [escape(display_path(root)) for root in roots]
     content = page_content(
-        by_activity(initiatives), root_text, now, vscode_failed, prs
+        by_activity(initiatives), roots_text, now, vscode_failed, prs
     )
-    github = f'<span class="err">{GITHUB_FAILED}</span>' if prs is None else ""
+    paths = "".join(f'<span class="path">{text}</span>' for text in roots_text)
+    github = f'<span class="err">{GITHUB_FAILED}</span>' if github_failed else ""
     storage_key = "bmad-dash:open"
     # Colour tokens (from DESIGN.md frontmatter) first, then the page's own rules.
     style = assets.read("tokens.css") + assets.read("page.css")
@@ -568,13 +577,13 @@ def render_page(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>bmad-dash: {root_text}</title>
+<title>bmad-dash: {", ".join(roots_text)}</title>
 <style>
 {style}</style>
 </head>
 <body>
 <main class="page" data-storage-key="{storage_key}">
-<header class="hdr"><h1>Initiatives</h1><span class="path">{root_text}</span>{github}</header>
+<header class="hdr"><h1>Initiatives</h1>{paths}{github}</header>
 {content}
 <script>
 {script}</script>

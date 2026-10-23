@@ -16,6 +16,17 @@ uv run --directory ~/Code/bmad-dash bmad-dash --project-root ~/Code/owid-grapher
 
 Then open http://127.0.0.1:8765/ (change the port with `--port`).
 
+Repeat `--project-root` to see several projects in one table:
+
+```sh
+uv run --directory ~/Code/bmad-dash bmad-dash \
+  --project-root ~/Code/owid-grapher --project-root ~/Code/bmad-dash
+```
+
+Their initiatives mix, newest activity first, with one "Show finished (n)".
+The header lists every root. A missing or non-git root, or two roots with the
+same folder name, stops the start with a message naming it.
+
 Each row shows last activity and a Status sentence: what is waiting (ticket
 counts by status, `forge open`, `spec to slice`) and tickets done/total, from
 the project's `_bmad/method/scripts/tickets.py status` (run with `uv`). When
@@ -28,7 +39,8 @@ Expand a row to see its forges, specs, walkthroughs and epics, then any tickets
 that sit directly in the initiative folder.
 
 A project is named by its root folder (`--project-root ~/Code/owid-grapher` is
-`owid-grapher`); each row's slug line reads `<project> · <slug>`.
+`owid-grapher`); each row's slug line reads `<project> · <slug>`. When one
+root can't reach GitHub, only its rows lose their PR buttons.
 
 `/file/<project>/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
 relative to that project's `_bmad-output/`. Rendered headings have ids, so a link can point at

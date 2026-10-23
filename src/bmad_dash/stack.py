@@ -96,18 +96,18 @@ def load_topology(root: Path, stack: GraphiteStack | None) -> Topology:
 def stack_prs(
     root: Path, initiatives: Sequence[Initiative], topology: Topology
 ) -> dict[str, PullRequest] | None:
-    """Initiative slug -> the PR its button shows. A missing slug gets no
-    button. None when GitHub couldn't be reached."""
+    """Initiative key (`<project>/<slug>`) -> the PR its button shows. A
+    missing key gets no button. None when GitHub couldn't be reached."""
     if topology is None:
         return None
     # Branches other initiatives' worktrees have checked out: not children.
     # Each row's own branch is subtracted in the rules.
     claimed = claimed_branches(i.worktrees[0] for i in initiatives if i.worktrees)
     if isinstance(topology, list):  # fallback walk over the user's PRs
-        found = {i.slug: row_pr(i, topology, claimed) for i in initiatives}
-        return {slug: pr for slug, pr in found.items() if pr is not None}
+        found = {i.key: row_pr(i, topology, claimed) for i in initiatives}
+        return {key: pr for key, pr in found.items() if pr is not None}
 
-    stacks: dict[str, list[str]] = {}  # slug -> [branch, ..., top]
+    stacks: dict[str, list[str]] = {}  # key -> [branch, ..., top]
     for initiative in initiatives:
         if not initiative.worktrees:
             continue
@@ -117,7 +117,7 @@ def stack_prs(
             continue
         stack = stack_branches(topology.children, branch, claimed)
         if stack is not None:  # None: fork
-            stacks[initiative.slug] = stack
+            stacks[initiative.key] = stack
     if not stacks:
         return {}
 
@@ -128,5 +128,5 @@ def stack_prs(
         results = dict(zip(branches, pool.map(lambda b: fetch_branch_pr(root, b), branches)))
     if any(result is None for result in results.values()):
         return None
-    found = {slug: highest_pr(stack, results) for slug, stack in stacks.items()}
-    return {slug: pr for slug, pr in found.items() if pr is not None}
+    found = {key: highest_pr(stack, results) for key, stack in stacks.items()}
+    return {key: pr for key, pr in found.items() if pr is not None}
