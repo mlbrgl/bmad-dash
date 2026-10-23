@@ -27,10 +27,13 @@ behind "Show finished (n)"; one with nothing open and no such status says
 Expand a row to see its forges, specs, walkthroughs and epics, then any tickets
 that sit directly in the initiative folder.
 
-`/file/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
-relative to `_bmad-output/`. Rendered headings have ids, so a link can point at
-a section: `/file/<path>#action-items` for `## Action items`. A missing path or one outside `_bmad-output/` gets
-a plain 404 page. Served files
+A project is named by its root folder (`--project-root ~/Code/owid-grapher` is
+`owid-grapher`); each row's slug line reads `<project> · <slug>`.
+
+`/file/<project>/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
+relative to that project's `_bmad-output/`. Rendered headings have ids, so a link can point at
+a section: `/file/<project>/<path>#action-items` for `## Action items`. An unknown project, a missing path or one outside `_bmad-output/` gets
+a plain 404 page. Open trees are remembered per `<project>/<slug>`. Served files
 are sandboxed, so they can't trigger VS Code.
 
 Walkthrough pages (`initiative-*/.../walkthrough-*/*.html`) are shown inside

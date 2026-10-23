@@ -181,7 +181,7 @@ def raw_get(server, path, host=None):
 
 
 def test_file_markdown_is_rendered(files_server):
-    response, body = raw_get(files_server, "/file/initiative-x/spec-x/spec-x.md?x=1")
+    response, body = raw_get(files_server, "/file/project/initiative-x/spec-x/spec-x.md?x=1")
     assert response.status == 200
     assert response.getheader("Content-Type").startswith("text/html")
     assert b"<table>" in body
@@ -190,7 +190,7 @@ def test_file_markdown_is_rendered(files_server):
 
 
 def test_file_html_is_served_as_is(files_server, files_project):
-    response, body = raw_get(files_server, "/file/initiative-x/forge-x/forge-report.html")
+    response, body = raw_get(files_server, "/file/project/initiative-x/forge-x/forge-report.html")
     assert response.status == 200
     assert response.getheader("Content-Type").startswith("text/html")
     expected = files_project / "_bmad-output/initiative-x/forge-x/forge-report.html"
@@ -198,19 +198,23 @@ def test_file_html_is_served_as_is(files_server, files_project):
 
 
 def test_file_encoded_name_is_decoded(files_server):
-    response, body = raw_get(files_server, "/file/initiative-x/with%20space.md")
+    response, body = raw_get(files_server, "/file/project/initiative-x/with%20space.md")
     assert response.status == 200
     assert b'<h1 id="spaced">Spaced</h1>' in body
 
 
 @pytest.mark.parametrize("path", [
-    "/file/../README.md",
-    "/file/a/%2e%2e/%2e%2e/README.md",
-    "/file/initiative-x/link-out.md",
-    "/file/initiative-x/missing.md",
-    "/file/initiative-x/config.toml",
-    "/file/initiative-x",
-    "/file/initiative-x/a%00b.md",
+    "/file/project/../README.md",
+    "/file/project/a/%2e%2e/%2e%2e/README.md",
+    "/file/project/initiative-x/link-out.md",
+    "/file/project/initiative-x/missing.md",
+    "/file/project/initiative-x/config.toml",
+    "/file/project/initiative-x",
+    "/file/project/initiative-x/a%00b.md",
+    "/file/nope/initiative-x/spec-x/spec-x.md",  # unknown project
+    "/file/initiative-x/spec-x/spec-x.md",  # old link: no project segment
+    "/file/project",
+    "/file/project/",
 ])
 def test_file_not_served_is_404_page(files_server, path):
     # Outside paths get the same 404 as missing ones.
@@ -222,10 +226,10 @@ def test_file_not_served_is_404_page(files_server, path):
 
 
 @pytest.mark.parametrize("path", [
-    "/file/initiative-x/spec-x/spec-x.md",
-    "/file/initiative-x/forge-x/forge-report.html",
-    "/file/initiative-x/spec-x/spec-x.md?frame=1",
-    "/file/initiative-x/forge-x/forge-report.html?frame=1",
+    "/file/project/initiative-x/spec-x/spec-x.md",
+    "/file/project/initiative-x/forge-x/forge-report.html",
+    "/file/project/initiative-x/spec-x/spec-x.md?frame=1",
+    "/file/project/initiative-x/forge-x/forge-report.html?frame=1",
 ])
 def test_served_files_are_sandboxed(files_server, path):
     # An opaque origin means a served file can't pass /vscode's Origin check.
@@ -239,7 +243,7 @@ def test_dashboard_is_not_sandboxed(files_server):
     assert response.getheader("Content-Security-Policy") is None
 
 
-@pytest.mark.parametrize("path", ["/", "/file/initiative-x/spec-x/spec-x.md"])
+@pytest.mark.parametrize("path", ["/", "/file/project/initiative-x/spec-x/spec-x.md"])
 def test_get_with_foreign_host_is_403(files_server, path):
     # DNS rebinding: the browser sends the attacker's host name.
     response, _ = raw_get(files_server, path, host="evil.example:80")

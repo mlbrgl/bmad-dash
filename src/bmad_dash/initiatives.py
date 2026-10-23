@@ -58,6 +58,13 @@ class Initiative:
     activity: Activity | None = None
     # Initiative file frontmatter `status`; "done" or "dropped" means finished.
     status: str = ""
+    # The project's folder name (`root.name`); set by `make_initiative`.
+    project: str = ""
+
+    @property
+    def key(self) -> str:
+        """`<project>/<slug>`: names this row for open trees and failures."""
+        return f"{self.project}/{self.slug}"
 
     @property
     def finished(self) -> bool:
@@ -159,6 +166,7 @@ def make_initiative(
         top_tickets=initiative_tickets(initiative_dir, tickets, now, next_info),
         activity=last_activity(initiative_dir, worktrees, commits),
         status=fields.get("status", ""),
+        project=root.name,
     )
 
 

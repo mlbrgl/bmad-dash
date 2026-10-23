@@ -23,6 +23,15 @@ class NotFound(Exception):
     """No such file, a folder, or a file type we don't serve."""
 
 
+def split_project(projects: dict[str, Path], rel: str) -> tuple[Path, str]:
+    """`<project>/<path>` -> (that project's root, `<path>`).
+    Raises NotFound when the project is unknown or there is no path."""
+    name, _, rest = rel.partition("/")
+    if name not in projects or not rest:
+        raise NotFound(rel)
+    return projects[name], rest
+
+
 def resolve_file(root: Path, rel: str) -> Path:
     """The real path of `rel` (relative to `<root>/_bmad-output/`).
 
@@ -110,7 +119,7 @@ MARKDOWN = (
 def render_markdown(path: Path) -> str:
     """A full HTML page for the markdown file at `path`. Each heading gets an
     `id` (e.g. `## Action items` -> `id="action-items"`), so a link can point
-    at a section: `/file/<path>#action-items`. A repeated heading gets
+    at a section: `/file/<project>/<path>#action-items`. A repeated heading gets
     `action-items-1`, `action-items-2`, ..."""
     frontmatter, body = split_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
     body_html = MARKDOWN.render(body)

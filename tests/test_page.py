@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
-from bmad_dash.page import relative_time, render_page
+from bmad_dash.page import relative_time, render_page as render_page_for
 from bmad_dash.prs import PullRequest
 from bmad_dash.rules import (
     action_css,
@@ -18,6 +18,14 @@ from bmad_dash.signals import Activity
 from bmad_dash.tree import Ticket, TreeItem
 
 NOW = datetime(2026, 10, 19, 12, 0)
+PROJECT = "proj"
+
+
+def render_page(initiatives, *args, **kwargs):
+    """The page, with every initiative named after PROJECT unless it has one."""
+    for initiative in initiatives:
+        initiative.project = initiative.project or PROJECT
+    return render_page_for(initiatives, *args, **kwargs)
 
 
 def render(initiatives, root=Path("/root")):
@@ -174,9 +182,9 @@ def test_tree_escapes_names_and_quotes_links():
     html = render([tree_initiative()])
     assert "<b>" not in html and "<i>" not in html
     assert "spec-&lt;b&gt;" in html
-    assert 'href="/file/initiative-a/epic-a/spec-%3Cb%3E/spec-%3Cb%3E.md"' in html
-    assert 'href="/file/initiative-a/epic-a/epic-a.md"' in html
-    assert ('<a class="name-link" href="/file/initiative-a/epic-a/story-t-plan.md">'
+    assert 'href="/file/proj/initiative-a/epic-a/spec-%3Cb%3E/spec-%3Cb%3E.md"' in html
+    assert 'href="/file/proj/initiative-a/epic-a/epic-a.md"' in html
+    assert ('<a class="name-link" href="/file/proj/initiative-a/epic-a/story-t-plan.md">'
             "&lt;i&gt;T&lt;/i&gt;</a>") in html
     assert html.count('href="/file/') == 3  # forge and ticket 1.2 have no file
 
@@ -192,8 +200,8 @@ def test_forge_report_link():
     initiative.tree[0].path = "initiative-a/forge-a/forge-a.md"
     initiative.tree[0].report = "initiative-a/forge-a/forge-report.html"
     forge = rows_of(render([initiative]))[1]
-    assert ('<a class="name-link" href="/file/initiative-a/forge-a/forge-a.md">forge-a</a>'
-            '<a class="report-link" href="/file/initiative-a/forge-a/forge-report.html">'
+    assert ('<a class="name-link" href="/file/proj/initiative-a/forge-a/forge-a.md">forge-a</a>'
+            '<a class="report-link" href="/file/proj/initiative-a/forge-a/forge-report.html">'
             "report</a>") in forge
 
 
@@ -209,9 +217,9 @@ def test_walkthrough_md_link_and_no_status_word():
     initiative = tree_initiative()
     initiative.tree.insert(1, walkthrough())
     row = rows_of(render([initiative]))[2]
-    assert ('<a class="name-link" href="/file/initiative-a/walkthrough-a/walkthrough-a.html">'
+    assert ('<a class="name-link" href="/file/proj/initiative-a/walkthrough-a/walkthrough-a.html">'
             'walkthrough-a</a><a class="report-link" '
-            'href="/file/initiative-a/walkthrough-a/walkthrough-a.md">md</a>') in row
+            'href="/file/proj/initiative-a/walkthrough-a/walkthrough-a.md">md</a>') in row
     assert "blocks" not in row
     assert '<span role="cell" class="st-' not in row
     assert '<span role="cell" class="t-kind">walk</span>' in row
@@ -226,7 +234,7 @@ def test_retro_row_shows_its_verdict_in_grey_and_no_state_when_none():
             NOW - timedelta(days=1), "finished", word=word))
         row = rows_of(render([initiative]))[2]
         assert '<span role="cell" class="t-kind">retro</span>' in row
-        assert 'href="/file/initiative-a/epic-a/epic-a-retrospective.md">epic-a-retrospective</a>' in row
+        assert 'href="/file/proj/initiative-a/epic-a/epic-a-retrospective.md">epic-a-retrospective</a>' in row
         assert cell in row
 
 
@@ -316,7 +324,7 @@ def test_only_newest_activity_row_starts_open():
     html = grid(render([old, new, none]))
     assert html.count('class="toggle" aria-expanded="true"') == 1
     assert html.count('class="toggle" aria-expanded="false"') == 2
-    assert re.search(r'aria-expanded="true" aria-controls="panel-0" data-slug="new"', html)
+    assert re.search(r'aria-expanded="true" aria-controls="panel-0" data-key="proj/new"', html)
     assert html.count(" hidden>") == 2
     assert '<div class="panel" role="cell" id="panel-0">' in html
 
@@ -328,7 +336,7 @@ def test_newest_row_with_a_tree_opens_when_newest_has_none():
     older.activity = Activity(NOW - timedelta(days=2), "", "plan")
     html = grid(render([empty, older]))
     assert html.count('class="toggle" aria-expanded="true"') == 1
-    assert 'aria-expanded="true" aria-controls="panel-1" data-slug="older"' in html
+    assert 'aria-expanded="true" aria-controls="panel-1" data-key="proj/older"' in html
 
 
 def test_nothing_open_without_activity():
@@ -337,10 +345,10 @@ def test_nothing_open_without_activity():
     assert html.count(" hidden>") == 2
 
 
-def test_storage_key_is_per_project_root():
+def test_storage_key_is_one_key_for_all_projects():
     html = render([], Path("/some/project"))
     assert '<main class="page" data-storage-key=' in html
-    assert 'data-storage-key="bmad-dash:open:/some/project"' in html
+    assert 'data-storage-key="bmad-dash:open"' in html
 
 
 # --- worktree cell ---
@@ -509,7 +517,7 @@ def markup(html: str) -> str:
 
 
 def slugs_in(html: str) -> list[str]:
-    return re.findall(r'<span class="slug">(.*?)</span>', html)
+    return re.findall(rf'<span class="slug">{PROJECT} · (.*?)</span>', html)
 
 
 def test_rows_sort_newest_activity_first_without_activity_last():
@@ -554,7 +562,7 @@ def test_top_tickets_come_after_epics_at_depth_zero():
     rows = rows_of(render([initiative]))
     assert '<span role="cell" class="t-kind">9</span>' in rows[-1]
     assert 'class="t-name d0"' in rows[-1]
-    assert 'href="/file/initiative-a/story-top-plan.md"' in rows[-1]
+    assert 'href="/file/proj/initiative-a/story-top-plan.md"' in rows[-1]
     assert "Top &lt;t&gt;" in rows[-1]
 
 
@@ -690,7 +698,7 @@ def test_failure_message_on_flagged_row_only():
         Initiative("initiative-a", "A", [Worktree(WT, "main")]),
         Initiative("initiative-b", "B", [Worktree(Path("/x/b"), "dev")]),
     ]
-    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="initiative-b")
+    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="proj/initiative-b")
     assert html.count("Couldn't open VS Code") == 1
     worktrees = re.findall(r'<div class="c-wt" role="cell">(.*?)</div>', html)
     assert "Couldn't open VS Code" not in worktrees[0]
@@ -701,7 +709,7 @@ def test_failure_message_on_flagged_row_only():
 def test_failure_message_shows_even_without_worktree():
     # The worktree vanished between render and click.
     initiatives = [Initiative("initiative-a", "A", [])]
-    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="initiative-a")
+    html = render_page(initiatives, Path("/root"), now=NOW, vscode_failed="proj/initiative-a")
     assert cell(html, "c-wt") == (
         '<span class="muted">no worktree</span>'
         '<span class="err">Couldn\'t open VS Code</span>'
@@ -1140,13 +1148,13 @@ def test_mixed_epic_hides_closed_tickets_behind_one_button():
     assert 'class="fold"' not in html
     assert html.count('class="closed-toggle"') == 1
     assert ('<button type="button" class="closed-toggle" aria-expanded="false"'
-            ' aria-controls="closed-initiative-a-epic-a"') in html
+            ' aria-controls="closed-proj/initiative-a-epic-a"') in html
     assert ">Show 2 closed tickets</button>" in html
-    group = html.split('id="closed-initiative-a-epic-a" hidden>')[1].split("</div></div>")[0]
+    group = html.split('id="closed-proj/initiative-a-epic-a" hidden>')[1].split("</div></div>")[0]
     assert "T1.1" in group and "T1.3" in group and "T1.2" not in group
     # The open row comes first, the button row last.
-    assert html.index("T1.2") < html.index("closed-initiative-a-epic-a")
-    assert html.index("closed-initiative-a-epic-a") < html.index('class="closed-toggle"')
+    assert html.index("T1.2") < html.index("closed-proj/initiative-a-epic-a")
+    assert html.index("closed-proj/initiative-a-epic-a") < html.index('class="closed-toggle"')
 
 
 def test_closed_tickets_read_their_state_as_a_grey_status():
@@ -1183,14 +1191,14 @@ def test_initiative_level_tickets_get_their_own_button():
     initiative = closed_initiative([tk("1.1", "done")], top=[tk("9", "done"), tk("10", "planned")])
     html = render([initiative])
     assert html.count('class="closed-toggle"') == 2
-    assert 'id="closed-initiative-a" hidden>' in html
-    assert 'aria-controls="closed-initiative-a"' in html
+    assert 'id="closed-proj/initiative-a" hidden>' in html
+    assert 'aria-controls="closed-proj/initiative-a"' in html
 
 
 def test_closed_buttons_are_not_remembered_and_epics_have_no_fold_script():
     html = render([closed_initiative([tk("1.1", "done")])])
     button = html.split('class="closed-toggle"')[1].split(">")[0]
-    assert "data-slug" not in button
+    assert "data-key" not in button
     assert 'querySelectorAll("button.toggle")' in html
     assert 'querySelectorAll("button.closed-toggle")' in html
     assert 'button.fold' not in html
@@ -1228,3 +1236,25 @@ def test_open_epic_blocks_initiative_close():
 def test_finished_epics_allow_initiative_close():
     initiative = finished_tree(signals_initiative([{"state": "done"}]))
     assert [a[0] for a in doc_actions(initiative)] == ["close"]
+
+
+def test_slug_line_names_the_project():
+    initiative = Initiative("foo", "Foo", [], project="owid-grapher")
+    html = render_page_for([initiative], Path("/x/owid-grapher"), now=NOW)
+    assert '<span class="slug">owid-grapher · foo</span>' in html
+
+
+def test_closed_group_ids_differ_between_projects():
+    def group_id(project):
+        initiative = closed_initiative([tk("1.1", "done")])
+        initiative.project = project
+        html = render_page_for([initiative], Path("/x"), now=NOW)
+        return re.search(r'aria-controls="(closed-[^"]*)"', html).group(1)
+
+    assert group_id("one") != group_id("two")
+
+
+def test_vscode_form_names_the_project():
+    initiative = Initiative("foo", "Foo", [Worktree(Path("/x"), "main")], project="owid-grapher")
+    html = render_page_for([initiative], Path("/x"), now=NOW)
+    assert '<input type="hidden" name="project" value="owid-grapher">' in html

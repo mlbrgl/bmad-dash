@@ -17,7 +17,7 @@ from bmad_dash.server import default_open_file
 from conftest import git
 from test_vscode import get_page, send
 
-PAGE = "/file/initiative-matched/walkthrough-x/walkthrough-x.html"
+PAGE = "/file/project/initiative-matched/walkthrough-x/walkthrough-x.html"
 WALKTHROUGH_HTML = (
     "<!doctype html><html><head><title>Walk &amp; <b>talk</b></title></head>"
     "<body><h1>Walk</h1></body></html>\n"
@@ -117,7 +117,7 @@ def test_walkthrough_is_served_as_wrapper(opener):
 
 def test_wrapper_title_falls_back_to_file_name(opener):
     server, _ = opener
-    _, response = get(server, "/file/initiative-matched/walkthrough-x/untitled.html")
+    _, response = get(server, "/file/project/initiative-matched/walkthrough-x/untitled.html")
     assert "<title>untitled.html</title>" in response.body
 
 
@@ -125,8 +125,8 @@ def test_wrapper_src_is_quoted(walk_project, opener):
     server, _ = opener
     walk = walk_project / "_bmad-output" / "initiative-matched" / "walkthrough-x"
     (walk / 'a "b"&<c>.html').write_text("<p>x</p>")
-    _, response = get(server, "/file/initiative-matched/walkthrough-x/a%20%22b%22%26%3Cc%3E.html")
-    assert 'src="/file/initiative-matched/walkthrough-x/a%20%22b%22%26%3Cc%3E.html?frame=1"' in response.body
+    _, response = get(server, "/file/project/initiative-matched/walkthrough-x/a%20%22b%22%26%3Cc%3E.html")
+    assert 'src="/file/project/initiative-matched/walkthrough-x/a%20%22b%22%26%3Cc%3E.html?frame=1"' in response.body
 
 
 def test_framed_walkthrough_has_relay_and_is_sandboxed(opener):
@@ -145,10 +145,10 @@ def test_framed_walkthrough_has_relay_and_is_sandboxed(opener):
 
 
 @pytest.mark.parametrize("path", [
-    "/file/initiative-x/spec-x/spec-x.md",
-    "/file/initiative-matched/walkthrough-x/notes.md",
-    "/file/initiative-x/forge-x/forge-report.html",
-    "/file/initiative-matched/misc/page.html",
+    "/file/project/initiative-x/spec-x/spec-x.md",
+    "/file/project/initiative-matched/walkthrough-x/notes.md",
+    "/file/project/initiative-x/forge-x/forge-report.html",
+    "/file/project/initiative-matched/misc/page.html",
 ])
 @pytest.mark.parametrize("query", ["", "?frame=1"])
 def test_other_files_are_untouched(opener, path, query):
@@ -171,7 +171,7 @@ def test_walkthrough_file_on_disk_is_unchanged(opener, walk_project):
     server, _ = opener
     get(server, PAGE)
     get(server, PAGE + "?frame=1")
-    page = walk_project / "_bmad-output" / PAGE.removeprefix("/file/")
+    page = walk_project / "_bmad-output" / PAGE.removeprefix("/file/project/")
     assert page.read_text() == WALKTHROUGH_HTML
 
 
@@ -264,7 +264,7 @@ def test_missing_or_folder_is_404(opener, walk_project, raw):
     assert opened == []
 
 
-SHARED_PAGE = "/file/initiative-shared/walkthrough-s/walkthrough-s.html"
+SHARED_PAGE = "/file/project/initiative-shared/walkthrough-s/walkthrough-s.html"
 
 
 def test_main_checkout_file_opens(opener, walk_project):
@@ -285,19 +285,21 @@ def test_git_folder_and_nested_worktree_are_404(opener, walk_project, rel):
 
 def test_no_worktree_is_404(opener, walk_project):
     server, opened = opener
-    page = "/file/initiative-orphan/walkthrough-o/walkthrough-o.html"
+    page = "/file/project/initiative-orphan/walkthrough-o/walkthrough-o.html"
     status, _ = post_open(server, {"page": page}, wt_file=a_py(walk_project))
     assert status == 404
     assert opened == []
 
 
 @pytest.mark.parametrize("page", [
-    "/file/initiative-x/spec-x/spec-x.md",
-    "/file/initiative-matched/walkthrough-x/notes.md",
-    "/file/initiative-matched/misc/page.html",
-    "/file/initiative-x/forge-x/forge-report.html",
-    "/file/initiative-matched/walkthrough-x/nope.html",
-    "/file/../secret.md",
+    "/file/project/initiative-x/spec-x/spec-x.md",
+    "/file/project/initiative-matched/walkthrough-x/notes.md",
+    "/file/project/initiative-matched/misc/page.html",
+    "/file/project/initiative-x/forge-x/forge-report.html",
+    "/file/project/initiative-matched/walkthrough-x/nope.html",
+    "/file/project/../secret.md",
+    "/file/nope/initiative-matched/walkthrough-x/walkthrough-x.html",  # unknown project
+    "/file/initiative-matched/walkthrough-x/walkthrough-x.html",  # old link: no project
     "initiative-matched/walkthrough-x/walkthrough-x.html",  # no /file/ prefix
     "",
 ])

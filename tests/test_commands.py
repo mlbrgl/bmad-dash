@@ -148,9 +148,9 @@ def test_page_renders_when_everything_fails(project, fail_commands, serve):
 
 
 def test_vscode_post_when_git_fails_redirects_to_failure(project, fail_commands, serve):
-    body = urlencode({"id": worktree_id(project), "slug": "initiative-shared"})
+    body = urlencode({"project": "project", "id": worktree_id(project), "slug": "initiative-shared"})
     fail_commands()
     server = serve(project, launch=lambda path: None)
     status, response = send(server, body=body)
     assert status == 303
-    assert response.getheader("Location") == "/?vscode_failed=initiative-shared"
+    assert response.getheader("Location") == "/?vscode_failed=project%2Finitiative-shared"

@@ -12,7 +12,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from bmad_dash import commands
-from bmad_dash.files import NotFound, Refused, not_found_page, render_markdown, resolve_file
+from bmad_dash.files import (
+    NotFound,
+    Refused,
+    not_found_page,
+    render_markdown,
+    resolve_file,
+    split_project,
+)
 from bmad_dash.initiatives import (
     initiative_worktree,
     list_initiatives,
@@ -79,7 +86,8 @@ def make_server(
 ) -> ThreadingHTTPServer:
     """A server for `root` on 127.0.0.1:`port` (0 picks a free port).
     `launch` opens a worktree and `open_file` opens one file; tests pass fakes."""
-    output_base = (root / "_bmad-output").resolve()
+    # Project name -> root. The name is the root folder's name; epic 2 adds entries.
+    projects = {root.name: root}
 
     class Handler(BaseHTTPRequestHandler):
         # Socket timeout for each connection (from StreamRequestHandler).
@@ -140,10 +148,15 @@ def make_server(
                 self.refuse_form(self.send_error)
                 return
             wanted = form.get("id", [""])[0]
+            project = form.get("project", [""])[0]
             slug = form.get("slug", [""])[0]
-            failed = "/?vscode_failed=" + quote(slug, safe="")
+            failed = "/?vscode_failed=" + quote(f"{project}/{slug}", safe="")
+            project_root = projects.get(project)
+            if project_root is None:
+                self.redirect(failed)
+                return
             # Fresh list each time: only a path git lists right now can run.
-            worktrees = list_worktrees(root)
+            worktrees = list_worktrees(project_root)
             if worktrees is None:  # git failed
                 self.redirect(failed)
                 return
@@ -178,19 +191,23 @@ def make_server(
                 self.send_empty(404)
                 return
             try:
-                page_path = resolve_file(root, unquote(page.removeprefix("/file/")))
+                project_root, rest = split_project(
+                    projects, unquote(page.removeprefix("/file/"))
+                )
+                page_path = resolve_file(project_root, rest)
             except (Refused, NotFound):
                 self.send_empty(404)
                 return
+            output_base = (project_root / "_bmad-output").resolve()
             page_rel = page_path.relative_to(output_base)
             if not is_walkthrough_page(page_rel):
                 self.send_empty(404)
                 return
-            worktrees = list_worktrees(root)  # one git call for both uses
+            worktrees = list_worktrees(project_root)  # one git call for both uses
             if worktrees is None:  # git failed: the wrapper shows its snackbar
                 self.send_empty(500)
                 return
-            worktree = initiative_worktree(root, page_rel.parts[0], worktrees)
+            worktree = initiative_worktree(project_root, page_rel.parts[0], worktrees)
             if worktree is None:
                 self.send_empty(404)
                 return
@@ -291,20 +308,22 @@ def make_server(
                 self.close_connection = True
 
         def serve_file(self, rel: str, framed: bool = False):
-            """A file under `_bmad-output/`. A walkthrough page is served as a
+            """`rel` is `<project>/<path>`: a file under that project's
+            `_bmad-output/`. A walkthrough page is served as a
             wrapper page that frames it; `framed` serves the walkthrough itself."""
             try:
-                target = resolve_file(root, rel)
+                project_root, rest = split_project(projects, rel)
+                target = resolve_file(project_root, rest)
             except (Refused, NotFound):
-                # Outside paths get the same 404 as missing ones: no hint
-                # about what exists beyond _bmad-output/.
+                # Outside paths and unknown projects get the same 404 as
+                # missing files: no hint about what exists beyond _bmad-output/.
                 self.send_html(not_found_page().encode("utf-8"), status=404)
                 return
             if target.suffix == ".md":
                 body = render_markdown(target).encode("utf-8")
             else:
                 body = target.read_bytes()
-            if is_walkthrough_page(target.relative_to(output_base)):
+            if is_walkthrough_page(target.relative_to((project_root / "_bmad-output").resolve())):
                 if not framed:
                     # Dashboard code, not project content: no sandbox, so it
                     # can POST /open-file for links the frame relays to it.

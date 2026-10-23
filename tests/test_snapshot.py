@@ -52,6 +52,7 @@ def initiatives() -> list[Initiative]:
     return [
         Initiative(
             slug="initiative-busy",
+            project="snapshot-root",
             title="Busy & <one>",
             worktrees=[Worktree(Path("/tmp/snapshot-root/wt busy"), "feature-busy")],
             tickets=[{"state": s} for s in states],
@@ -63,6 +64,7 @@ def initiatives() -> list[Initiative]:
         ),
         Initiative(
             slug="initiative-stale",
+            project="snapshot-root",
             title="Stale one",
             worktrees=[Worktree(Path("/tmp/snapshot-root/wt-stale"), "feature-stale")],
             tickets=[],
@@ -70,11 +72,13 @@ def initiatives() -> list[Initiative]:
         ),
         Initiative(
             slug="initiative-quiet",
+            project="snapshot-root",
             title="Quiet one",
             tickets=None,
         ),
         Initiative(
             slug="initiative-closed",
+            project="snapshot-root",
             title="Closed one",
             tickets=[{"state": "done"}, {"state": "dropped"}],
             # The forge is STALE, but a finished initiative's tree shows no stale tag.
@@ -90,7 +94,7 @@ PRS = {"initiative-busy": PullRequest(42, "feature-busy", "main", "draft", "http
 
 
 def test_page_matches_golden_file():
-    html = render_page(initiatives(), ROOT, NOW, vscode_failed="initiative-stale", prs=PRS)
+    html = render_page(initiatives(), ROOT, NOW, vscode_failed="snapshot-root/initiative-stale", prs=PRS)
     if os.environ.get("UPDATE_SNAPSHOT") == "1":
         GOLDEN.parent.mkdir(exist_ok=True)
         GOLDEN.write_text(html, encoding="utf-8")
@@ -103,7 +107,7 @@ def test_empty_page_says_no_initiatives():
 
 
 def test_github_failure_shows_in_header():
-    html = render_page(initiatives(), ROOT, NOW, vscode_failed="initiative-stale", prs=None)
+    html = render_page(initiatives(), ROOT, NOW, vscode_failed="snapshot-root/initiative-stale", prs=None)
     expected = GOLDEN.read_text(encoding="utf-8")
     # Same page, but the header says GitHub failed and no row has a PR button.
     assert '<span class="err">Couldn\'t reach GitHub</span></header>' in html

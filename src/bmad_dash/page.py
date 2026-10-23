@@ -65,12 +65,14 @@ def relative_time(when: datetime, now: datetime) -> str:
 # --- tree panel ---
 # Its own grid: kind · name · status · updated. Nesting indents the name only.
 
-def file_link(path: str, text: str, css_class: str) -> str:
-    href = escape("/file/" + quote(path))
+def file_link(project: str, path: str, text: str, css_class: str) -> str:
+    """The one place a file href is built: `/file/<project>/<path>`."""
+    href = escape("/file/" + quote(project) + "/" + quote(path))
     return f'<a class="{css_class}" href="{href}">{escape(text)}</a>'
 
 
 def name_cell(
+    project: str,
     name: str,
     path: str | None,
     depth: int,
@@ -82,9 +84,9 @@ def name_cell(
     if path is None:
         inner = f'<span class="name-text">{escape(name)}</span>'
     else:
-        inner = file_link(path, name, "name-link")
+        inner = file_link(project, path, name, "name-link")
     if report is not None:
-        inner += file_link(report, report_label, "report-link")
+        inner += file_link(project, report, report_label, "report-link")
     return f'<span role="cell" class="t-name d{depth}">{inner}</span>'
 
 
@@ -137,6 +139,7 @@ def item_cell(item: TreeItem, epic: TreeItem | None, worktree: Worktree | None) 
 
 
 def ticket_row(
+    project: str,
     ticket: Ticket,
     depth: int,
     now: datetime,
@@ -145,13 +148,14 @@ def ticket_row(
 ) -> str:
     return tree_row(
         ticket.ref,
-        name_cell(ticket.title, ticket.path, depth),
+        name_cell(project, ticket.title, ticket.path, depth),
         ticket_cell(ticket, worktree),
         updated_cell(ticket.updated, show_stale and ticket.stale, now),
     )
 
 
 def closed_ticket_rows(
+    project: str,
     tickets: list[Ticket],
     depth: int,
     now: datetime,
@@ -162,14 +166,14 @@ def closed_ticket_rows(
     """Open ticket rows, then a hidden group of the done and dropped ones, then
     one button row that shows them. No button when none is closed. Each
     part keeps the tickets' order."""
-    open_rows = [ticket_row(t, depth, now, show_stale, worktree)
+    open_rows = [ticket_row(project, t, depth, now, show_stale, worktree)
                  for t in tickets if t.word not in CLOSED_STATES]
     closed = [t for t in tickets if t.word in CLOSED_STATES]
     if not closed:
         return open_rows
     count = len(closed)
     noun = "1 closed ticket" if count == 1 else f"{count} closed tickets"
-    group = "".join(ticket_row(t, depth, now, show_stale, worktree) for t in closed)
+    group = "".join(ticket_row(project, t, depth, now, show_stale, worktree) for t in closed)
     button = (
         f'<button type="button" class="closed-toggle" aria-expanded="false"'
         f' aria-controls="{escape(group_id)}" data-show="Show {noun}"'
@@ -187,6 +191,7 @@ def closed_ticket_rows(
 
 
 def item_rows(
+    project: str,
     item: TreeItem,
     depth: int,
     now: datetime,
@@ -205,7 +210,7 @@ def item_rows(
     """
     head = tree_row(
         item.kind,
-        name_cell(item.name, item.path, depth, item.report, item.report_label),
+        name_cell(project, item.name, item.path, depth, item.report, item.report_label),
         item_cell(item, epic, worktree),
         updated_cell(item.updated, show_stale and item.state == STALE, now),
     )
@@ -214,11 +219,11 @@ def item_rows(
     specs = [child for child in item.children if child.kind == "spec"]
     nest_under = specs[0] if len(specs) == 1 else None
     for child in item.children:
-        rows += item_rows(child, depth + 1, now, show_stale, worktree, item, closed_prefix)
+        rows += item_rows(project, child, depth + 1, now, show_stale, worktree, item, closed_prefix)
         if child is nest_under:
-            rows += closed_ticket_rows(item.tickets, depth + 2, now, show_stale, worktree, group_id)
+            rows += closed_ticket_rows(project, item.tickets, depth + 2, now, show_stale, worktree, group_id)
     if nest_under is None:
-        rows += closed_ticket_rows(item.tickets, depth + 1, now, show_stale, worktree, group_id)
+        rows += closed_ticket_rows(project, item.tickets, depth + 1, now, show_stale, worktree, group_id)
     return [head] + rows
 
 
@@ -239,12 +244,14 @@ def panel_content(initiative: Initiative, now: datetime) -> str:
     rows = [f'<div class="t-row t-head" role="row">{heads}</div>']
     show_stale = tree_shows_stale(initiative)
     worktree = initiative.worktrees[0] if initiative.worktrees else None
+    project = initiative.project
+    closed_prefix = f"closed-{initiative.key}"
     for item in initiative.tree:
-        rows += item_rows(item, 0, now, show_stale, worktree,
-                          closed_prefix=f"closed-{initiative.slug}")
+        rows += item_rows(project, item, 0, now, show_stale, worktree,
+                          closed_prefix=closed_prefix)
     # Initiative-level tickets come after the epics, at the top level.
-    rows += closed_ticket_rows(initiative.top_tickets, 0, now, show_stale, worktree,
-                               f"closed-{initiative.slug}")
+    rows += closed_ticket_rows(project, initiative.top_tickets, 0, now, show_stale, worktree,
+                               closed_prefix)
     label = escape(f"{initiative.title} contents")
     return f'{note}<div class="tree" role="table" aria-label="{label}">{"".join(rows)}</div>'
 
@@ -259,7 +266,7 @@ def initiative_cell(initiative: Initiative, panel_id: str, is_open: bool) -> str
         expanded = "true" if is_open else "false"
         caret = (
             f'<button type="button" class="toggle" aria-expanded="{expanded}"'
-            f' aria-controls="{panel_id}" data-slug="{escape(initiative.slug)}"'
+            f' aria-controls="{panel_id}" data-key="{escape(initiative.key)}"'
             f' aria-label="Show tree: {title}">'
             f'<span class="caret" aria-hidden="true"></span></button>'
         )
@@ -268,7 +275,7 @@ def initiative_cell(initiative: Initiative, panel_id: str, is_open: bool) -> str
     heading = f'<span class="ttl">{caret}{title}</span>'
     return (
         f'<div class="c-title" role="cell">{heading}'
-        f'<span class="slug">{escape(initiative.slug)}</span></div>'
+        f'<span class="slug">{escape(initiative.project)} · {escape(initiative.slug)}</span></div>'
     )
 
 
@@ -285,11 +292,13 @@ def panel_cell(
 VSCODE_FAILED = "Couldn't open VS Code"
 
 
-def vscode_form(worktree: Worktree, slug: str) -> str:
+def vscode_form(worktree: Worktree, project: str, slug: str) -> str:
     """The whole worktree block is the submit button that opens it in VS Code.
-    POSTs the worktree id (what to open) and the slug (where to show a failure)."""
+    POSTs the project, the worktree id (what to open) and the slug (with the
+    project, where to show a failure)."""
     return (
         f'<form class="vscode" method="post" action="/vscode">'
+        f'<input type="hidden" name="project" value="{escape(project)}">'
         f'<input type="hidden" name="id" value="{worktree_id(worktree.path)}">'
         f'<input type="hidden" name="slug" value="{escape(slug)}">'
         f'<button type="submit" class="wt" title="{escape(str(worktree.path))}">'
@@ -306,8 +315,8 @@ def worktree_cell(initiative: Initiative, vscode_failed: str = "") -> str:
     if not initiative.worktrees:
         inner = '<span class="muted">no worktree</span>'
     else:
-        inner = "".join(vscode_form(w, initiative.slug) for w in initiative.worktrees)
-    if vscode_failed and initiative.slug == vscode_failed:
+        inner = "".join(vscode_form(w, initiative.project, initiative.slug) for w in initiative.worktrees)
+    if vscode_failed and initiative.key == vscode_failed:
         inner += f'<span class="err">{VSCODE_FAILED}</span>'
     return f'<div class="c-wt" role="cell">{inner}</div>'
 
@@ -491,7 +500,7 @@ def page_content(
 ) -> str:
     """Unfinished rows in the table, finished ones behind Show finished (n).
     `initiatives` come sorted; `root_text` is already escaped. `vscode_failed`
-    is the slug whose row shows "Couldn't open VS Code"."""
+    is the `<project>/<slug>` whose row shows "Couldn't open VS Code"."""
     if not initiatives:
         return f'<p class="empty">No initiatives in <code>{root_text}/_bmad-output/</code>.</p>'
 
@@ -537,7 +546,7 @@ def render_page(
     vscode_failed: str = "",
     prs: Mapping[str, PullRequest] | None = NO_PRS,
 ) -> str:
-    """The whole page. `vscode_failed` is a slug from the URL; it only picks
+    """The whole page. `vscode_failed` is a `<project>/<slug>` from the URL; it only picks
     which row shows the failure message. `prs` maps a slug to the PR its row
     shows (from `stack.stack_prs`). It is None when GitHub couldn't be
     reached: the header says so and no row gets a PR button."""
@@ -548,10 +557,10 @@ def render_page(
         by_activity(initiatives), root_text, now, vscode_failed, prs
     )
     github = f'<span class="err">{GITHUB_FAILED}</span>' if prs is None else ""
-    storage_key = escape("bmad-dash:open:" + str(root))
+    storage_key = "bmad-dash:open"
     # Colour tokens (from DESIGN.md frontmatter) first, then the page's own rules.
     style = assets.read("tokens.css") + assets.read("page.css")
-    # Opens and closes panels; saves open slugs as a JSON list. An empty list
+    # Opens and closes panels; saves open `<project>/<slug>` keys as a JSON list. An empty list
     # counts as saved. Storage can throw (blocked, private mode): it is ignored.
     script = assets.read("page.js")
     return f"""<!doctype html>

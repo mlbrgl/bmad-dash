@@ -10,8 +10,8 @@
     document.getElementById(button.getAttribute("aria-controls")).hidden = !open;
   }
   function save() {
-    var slugs = toggles.filter(isOpen).map(function (b) { return b.dataset.slug; });
-    try { localStorage.setItem(key, JSON.stringify(slugs)); } catch (e) {}
+    var keys = toggles.filter(isOpen).map(function (b) { return b.dataset.key; });
+    try { localStorage.setItem(key, JSON.stringify(keys)); } catch (e) {}
   }
 
   var saved = null;
@@ -26,7 +26,7 @@
   if (saved !== null) {
     toggles.forEach(function (b) {
       var finished = b.closest(".is-finished") !== null;
-      setOpen(b, !finished && saved.indexOf(b.dataset.slug) !== -1);
+      setOpen(b, !finished && saved.indexOf(b.dataset.key) !== -1);
     });
   }
 

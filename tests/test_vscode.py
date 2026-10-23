@@ -41,7 +41,7 @@ def wt_a(project):
 
 def test_valid_open_launches_listed_path(vscode, project):
     server, launched = vscode
-    status, response = send(server, body=urlencode({"id": worktree_id(wt_a(project))}))
+    status, response = send(server, body=urlencode({"project": "project", "id": worktree_id(wt_a(project))}))
     assert status == 303
     assert response.getheader("Location") == "/"
     assert launched == [wt_a(project)]  # called once
@@ -51,7 +51,7 @@ def test_localhost_host_and_origin_are_accepted(vscode, project):
     server, launched = vscode
     port = server.server_port
     headers = {"Host": f"localhost:{port}", "Origin": f"http://localhost:{port}"}
-    status, _ = send(server, body=urlencode({"id": worktree_id(project)}), headers=headers)
+    status, _ = send(server, body=urlencode({"project": "project", "id": worktree_id(project)}), headers=headers)
     assert status == 303
     assert launched == [project]
 
@@ -82,16 +82,33 @@ def test_bad_host_is_403(vscode, project):
 
 
 @pytest.mark.parametrize("fields", [
-    {"id": "000000000000", "slug": "initiative-matched"},
-    {"id": "/etc", "slug": "initiative-matched"},
-    {"path": "/etc", "slug": "initiative-matched"},
-    {"slug": "initiative-matched"},
+    {"project": "project", "id": "000000000000", "slug": "initiative-matched"},
+    {"project": "project", "id": "/etc", "slug": "initiative-matched"},
+    {"project": "project", "path": "/etc", "slug": "initiative-matched"},
+    {"project": "project", "slug": "initiative-matched"},
 ])
 def test_unknown_id_or_path_redirects_with_flag(vscode, fields):
     server, launched = vscode
     status, response = send(server, body=urlencode(fields))
     assert status == 303
-    assert response.getheader("Location") == "/?vscode_failed=initiative-matched"
+    assert response.getheader("Location") == "/?vscode_failed=project%2Finitiative-matched"
+    assert launched == []
+
+
+def test_unknown_project_redirects_with_flag(vscode, project):
+    server, launched = vscode
+    body = urlencode({"project": "nope", "id": worktree_id(project), "slug": "initiative-matched"})
+    status, response = send(server, body=body)
+    assert status == 303
+    assert response.getheader("Location") == "/?vscode_failed=nope%2Finitiative-matched"
+    assert launched == []
+
+
+def test_missing_project_redirects_with_flag(vscode, project):
+    server, launched = vscode
+    status, response = send(server, body=urlencode({"id": worktree_id(project), "slug": "x"}))
+    assert status == 303
+    assert response.getheader("Location") == "/?vscode_failed=%2Fx"
     assert launched == []
 
 
@@ -99,32 +116,32 @@ def test_refused_without_slug_redirects_with_empty_flag(vscode):
     server, launched = vscode
     status, response = send(server, body=urlencode({"id": "000000000000"}))
     assert status == 303
-    assert response.getheader("Location") == "/?vscode_failed="
+    assert response.getheader("Location") == "/?vscode_failed=%2F"
     assert launched == []
 
 
 def test_slug_is_quoted_in_redirect(vscode):
     server, launched = vscode
-    body = urlencode({"id": "nope", "slug": "a b&c=/d"})
+    body = urlencode({"project": "project", "id": "nope", "slug": "a b&c=/d"})
     status, response = send(server, body=body)
     assert status == 303
-    assert response.getheader("Location") == "/?vscode_failed=a%20b%26c%3D%2Fd"
+    assert response.getheader("Location") == "/?vscode_failed=project%2Fa%20b%26c%3D%2Fd"
     assert launched == []
 
 
 def test_path_field_is_ignored_even_with_valid_id_name(vscode, project):
     server, launched = vscode
-    body = urlencode({"id": str(project), "path": str(project), "slug": "x"})
+    body = urlencode({"project": "project", "id": str(project), "path": str(project), "slug": "x"})
     status, response = send(server, body=body)
     assert status == 303
-    assert response.getheader("Location") == "/?vscode_failed=x"
+    assert response.getheader("Location") == "/?vscode_failed=project%2Fx"
     assert launched == []
 
 
 def test_slug_field_never_picks_what_opens(vscode, project):
     # The slug only labels the failure; the id alone picks the worktree.
     server, launched = vscode
-    body = urlencode({"id": worktree_id(wt_a(project)), "slug": "initiative-shared"})
+    body = urlencode({"project": "project", "id": worktree_id(wt_a(project)), "slug": "initiative-shared"})
     status, response = send(server, body=body)
     assert status == 303
     assert response.getheader("Location") == "/"
@@ -169,10 +186,10 @@ def test_code_missing_redirects_with_flag(project, serve):
         raise FileNotFoundError("code")
 
     server = serve(project, launch=broken_launch)
-    body = urlencode({"id": worktree_id(project), "slug": "initiative-shared"})
+    body = urlencode({"project": "project", "id": worktree_id(project), "slug": "initiative-shared"})
     status, response = send(server, body=body)
     assert status == 303
-    assert response.getheader("Location") == "/?vscode_failed=initiative-shared"
+    assert response.getheader("Location") == "/?vscode_failed=project%2Finitiative-shared"
     assert calls == [project]
 
 
@@ -212,12 +229,12 @@ def get_page(server, path):
 
 def test_flag_shows_message_on_that_row_only(vscode):
     server, launched = vscode
-    status, body = get_page(server, "/?vscode_failed=initiative-matched")
+    status, body = get_page(server, "/?vscode_failed=project%2Finitiative-matched")
     assert status == 200
     assert body.count("Couldn't open VS Code") == 1
     # The message sits in the initiative-matched row, before the next row starts.
     rows = body.split('role="row">')
-    matched = [r for r in rows if '<span class="slug">initiative-matched</span>' in r]
+    matched = [r for r in rows if '<span class="slug">project · initiative-matched</span>' in r]
     assert len(matched) == 1
     assert "Couldn't open VS Code" in matched[0]
     assert launched == []
