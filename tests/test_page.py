@@ -6,7 +6,7 @@ from urllib.parse import quote, unquote
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.page import relative_time, render_page
 from bmad_dash.prs import PullRequest
-from bmad_dash.rules import waiting_items
+from bmad_dash.rules import doc_actions, waiting_items
 from bmad_dash.signals import Activity
 from bmad_dash.tree import Ticket, TreeItem
 
@@ -397,6 +397,9 @@ def status_text(html: str) -> str:
 def finished_tree(initiative: Initiative) -> Initiative:
     """Finish the forge (the spec already is) so only ticket items show."""
     initiative.tree[0].state = "finished"
+    for item in initiative.tree:
+        if item.kind == "epic":
+            item.state = "finished"
     return initiative
 
 
@@ -866,12 +869,12 @@ def test_no_worktree_statuses_keep_built_green_blocked_warm_rest_grey():
 
 # --- epic and retro actions ---
 
-def epic_item(word, name="epic-x", retro_word=None, tickets=(), state="open"):
+def epic_item(word, name="epic-x", retro_word=None, tickets=(), state="open", current=True):
     children = []
     if retro_word is not None:
         children.append(TreeItem("retro", f"{name}-retrospective",
                                  f"initiative-a/{name}/{name}-retrospective.md",
-                                 None, "finished", word=retro_word))
+                                 None, "finished", word=retro_word, current=current))
     return TreeItem("epic", name, f"initiative-a/{name}/{name}.md", None, state,
                     children=children, tickets=list(tickets), word=word)
 
@@ -1147,3 +1150,37 @@ def test_closed_buttons_are_not_remembered_and_epics_have_no_fold_script():
     assert 'querySelectorAll("button.toggle")' in html
     assert 'querySelectorAll("button.closed-toggle")' in html
     assert 'button.fold' not in html
+
+
+# --- rules agree: stale retros, dropped epics, close needs finished epics ---
+
+def test_stale_rejected_retro_is_grey_and_resume_has_no_address_suffix():
+    item = epic_item("in progress", retro_word="rejected", current=False)
+    assert item_cells(item)[1] == '<span role="cell" class="st-muted">rejected</span>'
+    assert hrefs(item_cells(item)[0])[0] == "/bmad Resume work on epic-x"
+
+
+def test_stale_open_items_retro_is_grey_without_plan_items():
+    item = epic_item("in progress", retro_word="open items", current=False)
+    assert item_cells(item)[1] == '<span role="cell" class="st-muted">open items</span>'
+
+
+def test_dropped_epic_with_open_tickets_is_grey_and_so_is_its_retro():
+    open_ticket = Ticket("1.1", "T", "in progress", None, None, False)
+    assert item_cells(epic_item("dropped", tickets=[open_ticket]))[0] == (
+        '<span role="cell" class="st-muted">dropped</span>')
+    for word in ("rejected", "open items"):
+        item = epic_item("dropped", retro_word=word, tickets=[open_ticket])
+        assert item_cells(item)[1] == f'<span role="cell" class="st-muted">{word}</span>'
+
+
+def test_open_epic_blocks_initiative_close():
+    initiative = finished_tree(signals_initiative([{"state": "done"}]))
+    initiative.tree[1].state = "open"
+    assert "close" not in [a[0] for a in doc_actions(initiative)]
+    assert status_text(render([initiative])) != "confirm close or add work"
+
+
+def test_finished_epics_allow_initiative_close():
+    initiative = finished_tree(signals_initiative([{"state": "done"}]))
+    assert [a[0] for a in doc_actions(initiative)] == ["close"]

@@ -154,11 +154,11 @@ def make_action(text: str, prompt: str, step: str) -> Action:
 
 
 def resume_action(epic: TreeItem) -> Action:
-    """`resume`; after a rejected retro it also says to address it."""
+    """`resume`; after a current rejected retro it also says to address it."""
     retro = epic_retro(epic)
     prompt = f"/bmad Resume work on {epic.name}"
     step = f"resume work on {epic.name}"
-    if retro is not None and retro.word == "rejected" and retro.path:
+    if retro is not None and retro.word == "rejected" and retro.current and retro.path:
         prompt += f": address {output_path(retro.path)}"
         step += " and address its rejected retro"
     return make_action("resume", prompt, step)
@@ -187,8 +187,9 @@ def epic_actions(epic: TreeItem) -> list[Action]:
 
 def retro_actions(retro: TreeItem, epic: TreeItem) -> list[Action]:
     """The actions a retro's cell offers; [] means it shows a status.
-    A finished epic's retro needs nothing."""
-    if not retro.path or epic.state == FINISHED:
+    A finished or dropped epic's retro needs nothing, nor does a stale one."""
+    if (not retro.path or epic.state == FINISHED or epic.word == "dropped"
+            or not retro.current):
         return []
     if retro.word == "open items":
         prompt = f"/bmad-ticket Turn the action items in {output_path(retro.path)} into tickets"
@@ -245,7 +246,7 @@ def open_paths(items: list[TreeItem], kind: str) -> list[str]:
 
 def doc_actions(initiative: Initiative) -> list[Action]:
     """The Status sentence's doc actions: `resume forge`, `slice spec`, and
-    `close` (only with no counts and nothing open)."""
+    `close` (only with no counts, every epic finished and nothing else open)."""
     actions = []
     forges = open_paths(initiative.tree, "forge")
     specs = open_paths(initiative.tree, "spec")
@@ -257,7 +258,8 @@ def doc_actions(initiative: Initiative) -> list[Action]:
         actions.append(make_action(
             "slice spec", f"/bmad-ticket Slice {', '.join(specs)}",
             "slice the open spec"))
-    if not actions and not waiting_items(initiative):
+    if (not actions and not waiting_items(initiative)
+            and not has_open(initiative.tree, "epic")):
         actions.append(make_action(
             "close", f"/bmad-ticket Close {initiative.slug}, or plan more work",
             f"close {initiative.slug} or plan more work"))

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import write_config
 from bmad_dash.initiatives import list_initiatives, read_title
 from bmad_dash.page import render_page
 from bmad_dash.rules import word_class
@@ -196,6 +197,47 @@ def test_epic_with_no_ticket_planned_is_not_started(initiative):
     make_folder(initiative, "epic-x")
     tickets = [ticket("1.1", "planned"), ticket("1.2", "backlog")]
     assert only(build_tree(initiative, tickets, NOW)).word == "not started"
+
+
+@pytest.mark.parametrize("states", [
+    ["in-progress", "backlog"], ["done", "backlog"], ["review", "planned"],
+])
+def test_epic_with_a_started_ticket_is_in_progress_without_plan_status(initiative, states):
+    make_folder(initiative, "epic-x")
+    tickets = [ticket(f"1.{i}", state) for i, state in enumerate(states)]
+    assert only(build_tree(initiative, tickets, NOW)).word == "in progress"
+
+
+def test_epic_with_no_started_ticket_is_not_started(initiative):
+    make_folder(initiative, "epic-x")
+    tickets = [ticket("1.1", "planned"), ticket("1.2", "backlog"), ticket("1.3", "dropped")]
+    assert only(build_tree(initiative, tickets, NOW)).word == "not started"
+
+
+def test_retro_current_flag_follows_the_newest_plan(initiative):
+    epic = make_folder(initiative, "epic-x")
+    write_dated_retro(epic, "rejected", NOW - timedelta(days=2))
+    retro = only(only(build_tree(initiative, [], NOW)).children)
+    assert retro.current  # no plan beside it
+    write_plan(epic, "story-a-plan.md", "'1'", NOW - timedelta(days=3))
+    assert only(only(build_tree(initiative, [], NOW)).children).current
+    write_plan(epic, "story-b-plan.md", "'2'", NOW - timedelta(days=1))
+    assert not only(only(build_tree(initiative, [], NOW)).children).current
+
+
+def test_epic_file_dropped_with_an_open_ticket_reads_dropped(initiative):
+    epic = make_folder(initiative, "epic-x")
+    set_epic_status(epic, "dropped")
+    item = only(build_tree(initiative, [ticket("1.1", "in-progress")], NOW))
+    assert item.word == "dropped"
+    assert item.state == OPEN
+
+
+def test_epic_file_dropped_without_tickets_has_no_word(initiative):
+    epic = make_folder(initiative, "epic-x")
+    set_epic_status(epic, "dropped")
+    assert only(build_tree(initiative, [], NOW)).word == ""
+    assert only(build_tree(initiative, None, NOW)).word == ""
 
 
 def test_epic_with_all_tickets_built_and_no_retro_is_to_retro(initiative):
@@ -935,11 +977,15 @@ def test_word_classes():
     assert word_class("a word the rules never named") == "st-muted"
 
 
-def project_with_next(tmp_path: Path, tickets: list[dict], next_output: str, next_exit=0):
+def project_with_next(tmp_path: Path, tickets: list[dict], next_output: str, next_exit=0,
+                      worktree=False):
     root = tmp_path / "project"
     root.mkdir()
     subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
     make_folder(root / "_bmad-output" / "initiative-x", "epic-x")
+    if worktree:
+        # Before the fake tickets.py: both create `_bmad/`.
+        write_config(root, '[core]\nactive_initiative = "initiative-x"\n')
     data = json.dumps(json.dumps({"tickets": tickets}))
     write_fake_tickets_py(
         root,
@@ -992,3 +1038,48 @@ def test_failing_next_keeps_tree_and_counts_without_waits_or_ready(tmp_path):
     )
     assert "1/3 done" in html
     assert "tickets unavailable" not in html
+
+
+def test_failing_next_with_a_worktree_offers_no_start_but_ready_next_does(tmp_path):
+    tickets = [ticket("1.1", "planned")]
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    failing = project_with_next(tmp_path / "a", tickets, "", next_exit=1, worktree=True)
+    html = render_page(list_initiatives(failing, now=NOW), failing)
+    assert '<span role="cell" class="st-muted">planned</span>' in html
+    assert "%2Fbmad-build%20" not in html  # no ticket `start` link
+    ready = project_with_next(tmp_path / "b", tickets, next_json([{"ref": "1.1"}]),
+                              worktree=True)
+    html = render_page(list_initiatives(ready, now=NOW), ready)
+    assert "%2Fbmad-build%201.1" in html
+
+
+def page_of(tmp_path, tickets, epic_setup):
+    root = project_with_next(tmp_path, tickets, next_json(), worktree=True)
+    epic_setup(root / "_bmad-output" / "initiative-x" / "epic-x")
+    return render_page(list_initiatives(root, now=NOW), root)
+
+
+def test_old_retro_shows_no_stale_tag(tmp_path):
+    def setup(epic):
+        write_dated_retro(epic, "accepted", NOW - timedelta(days=60))
+    html = page_of(tmp_path, [ticket("1.1", "in-progress")], setup)
+    assert "accepted</span>" in html
+    assert 'class="stale-tag"' not in html
+
+
+def test_open_items_retro_under_a_finished_epic_is_grey_accepted(tmp_path):
+    def setup(epic):
+        set_epic_status(epic, "done")
+        write_dated_retro(epic, "accepted-with-open-items", NOW - timedelta(days=1))
+    html = page_of(tmp_path, [ticket("1.1", "done")], setup)
+    assert '<span role="cell" class="st-muted">accepted</span>' in html
+    assert "plan items" not in html
+
+
+def test_done_epic_with_an_open_ticket_and_current_open_items_retro_shows_plan_items(tmp_path):
+    def setup(epic):
+        set_epic_status(epic, "done")
+        write_dated_retro(epic, "accepted-with-open-items", NOW - timedelta(days=1))
+    html = page_of(tmp_path, [ticket("1.1", "in-progress")], setup)
+    assert ">plan items</a>" in html
