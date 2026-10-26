@@ -12,7 +12,6 @@ from bmad_dash.rules import (
     item_actions,
     resume_prompt,
     retro_word,
-    waiting_items,
 )
 from bmad_dash.signals import Activity
 from bmad_dash.tree import Ticket, TreeItem
@@ -46,8 +45,8 @@ def cell(html: str, css_class: str) -> str:
 
 def test_one_row_per_initiative_plus_header():
     initiatives = [
-        Initiative("initiative-a", "A", []),
-        Initiative("initiative-b", "B", [Worktree(Path("/x"), "main")]),
+        Initiative("initiative-a", "A", [], tickets=[]),
+        Initiative("initiative-b", "B", [Worktree(Path("/x"), "main")], tickets=[]),
     ]
     html = render(initiatives)
     assert html.count('role="row"') == 1 + len(initiatives)
@@ -55,11 +54,11 @@ def test_one_row_per_initiative_plus_header():
     assert "<table" not in html and "<tr" not in html and "<details" not in html
 
 
-def test_five_column_heads():
+def test_four_column_heads():
     html = render([Initiative("initiative-a", "A", [])])
     heads = re.findall(r'<div role="columnheader">(.*?)</div>', html)
     texts = [re.sub(r"<[^>]+>", "", h) for h in heads]
-    assert texts == ["Initiative", "Worktree", "Last activity", "Status", "Actions"]
+    assert texts == ["Initiative", "Worktree", "Last activity", "Actions"]
 
 
 def test_every_value_is_escaped():
@@ -251,7 +250,7 @@ def test_tree_without_tickets_shows_note_first():
     epic.tickets, epic.word = [], ""
     html = render([initiative])
     panel = html.split('<div class="panel" role="cell"')[1]
-    assert panel.index("tickets unavailable") < panel.index('role="table"')
+    assert panel.index("Couldn't read tickets: tickets.py failed") < panel.index('role="table"')
     rows = rows_of(html)[1:]
     assert len(rows) == 3  # forge, epic, spec: no ticket rows
     assert '<span role="cell"></span>' in rows[1]
@@ -265,7 +264,7 @@ def test_tree_has_no_old_badges_or_dates():
 
 
 def test_one_toggle_per_non_empty_row_controlling_its_panel():
-    initiatives = [tree_initiative(slug="a"), Initiative("b", "B", []),
+    initiatives = [tree_initiative(slug="a"), Initiative("b", "B", [], tickets=[]),
                    tree_initiative(slug="c")]
     html = render(initiatives)
     controls = re.findall(r'class="toggle" aria-expanded="\w+" aria-controls="([\w-]+)"', html)
@@ -275,7 +274,7 @@ def test_one_toggle_per_non_empty_row_controlling_its_panel():
 
 
 def test_empty_tree_has_no_toggle_or_panel():
-    html = render([Initiative("initiative-a", "A", [])])
+    html = render([Initiative("initiative-a", "A", [], tickets=[])])
     assert "toggle" not in grid(html)
     assert 'class="panel"' not in html
 
@@ -284,7 +283,7 @@ def test_panel_comes_last_in_dom():
     html = render([tree_initiative()])
     row = html.split('<div class="init" role="row">')[1]
     order = [row.index(f'class="{c}"') for c in
-             ("c-title", "c-wt", "c-act", "c-status", "c-btns", "panel")]
+             ("c-title", "c-wt", "c-act", "c-btns", "panel")]
     assert order == sorted(order)
 
 
@@ -295,7 +294,7 @@ def test_tab_order_caret_worktree_resume_pr_tree():
     html = render_page([initiative], [Path("/root")], now=NOW, prs={"proj/initiative-a": pr(7, "b")})
     row = html.split('<div class="init" role="row">')[1]
     order = [row.index(marker) for marker in
-             ('class="toggle"', 'class="wt"', ">Resume<", ">#7<", 'class="name-link"')]
+             ('class="toggle"', 'class="wt"', ">resume<", ">#7<", 'class="name-link"')]
     assert order == sorted(order)
 
 
@@ -330,7 +329,7 @@ def test_only_newest_activity_row_starts_open():
 
 
 def test_newest_row_with_a_tree_opens_when_newest_has_none():
-    empty = Initiative("empty", "E", [])
+    empty = Initiative("empty", "E", [], tickets=[])
     empty.activity = Activity(NOW - timedelta(minutes=5), "", "commit")
     older = tree_initiative(slug="older")
     older.activity = Activity(NOW - timedelta(days=2), "", "plan")
@@ -402,12 +401,7 @@ def test_no_activity_shows_none():
     assert cell(html, "c-act") == '<span class="muted">none</span>'
 
 
-# --- status cell ---
-
-def status_text(html: str) -> str:
-    """The Status cell's visible text."""
-    return re.sub(r"<[^>]+>", "", cell(html, "c-status"))
-
+# --- row: four cells, resume on top, doc chips under it ---
 
 def finished_tree(initiative: Initiative) -> Initiative:
     """Finish the forge (the spec already is) so only ticket items show."""
@@ -418,87 +412,156 @@ def finished_tree(initiative: Initiative) -> Initiative:
     return initiative
 
 
-def test_status_ticket_counts_in_order_then_done():
-    tickets = ([{"state": "planned"}] + [{"state": "review", "status": "built"}] * 5
-               + [{"state": "dropped"}])
-    html = render([finished_tree(signals_initiative(tickets))])
-    # No `next` info: a planned ticket is not ready, so it is grey.
-    assert cell(html, "c-status") == (
-        '<span class="st-built">5 built</span><span class="sep">·</span>'
-        '<span class="st-muted">1 planned</span><span class="sep">·</span>'
-        '<span class="done-n">0/6 done</span>'
-    )
+def row_html(html: str) -> str:
+    """One initiative row's markup, without its tree panel."""
+    return html.split('class="init')[1].split('<div class="panel"')[0]
 
 
-def test_status_in_progress_word_and_order():
-    tickets = [{"state": "backlog"}, {"state": "in-progress"}, {"state": "done"}]
-    html = render([finished_tree(signals_initiative(tickets))])
-    assert status_text(html) == "1 in progress·1 backlog·1/3 done"
+def done_epic(name: str = "epic-a") -> TreeItem:
+    done = Ticket("1.1", "Done", "done", None, None, False)
+    return TreeItem("epic", name, f"initiative-a/{name}/{name}.md", None, "finished",
+                    tickets=[done], word="done")
 
 
-def test_status_doc_cues_without_tickets():
-    initiative = signals_initiative([])
-    initiative.tree[1].children[0].state = "stale"  # open spec inside the epic
-    html = render([initiative])
-    # The forge is stale (still open); no `x/y done` without tickets.
-    assert status_text(html) == "forge open·spec to slice"  # no worktree
+def plain(**kwargs) -> Initiative:
+    """A worktree, tickets loaded, one epic done and nothing else open."""
+    kwargs.setdefault("tickets", [])
+    kwargs.setdefault("tree", [done_epic()])
+    return Initiative("initiative-a", "A", [Worktree(WT, "main")], **kwargs)
 
 
-def test_open_walkthrough_leaves_status_unchanged():
-    tickets = [{"state": "done"}] * 2
-    plain = render([finished_tree(signals_initiative(tickets))])
-    initiative = finished_tree(signals_initiative(tickets))
-    initiative.tree.insert(1, walkthrough("stale"))
-    assert cell(render([initiative]), "c-status") == cell(plain, "c-status")
+def test_row_has_four_cells_then_the_panel():
+    html = render([tree_initiative()])
+    row = html.split('<div class="init" role="row">')[1]
+    order = [row.index(f'class="{c}"') for c in ("c-title", "c-wt", "c-act", "c-btns", "panel")]
+    assert order == sorted(order)
+    assert row_html(html).count('role="cell"') == 4
+    assert "c-status" not in html
 
 
-def test_status_overflow_collapses_to_plus_n():
-    tickets = [{"state": "review", "status": "built"}, {"state": "planned"},
-               {"state": "backlog"}]
-    html = render([signals_initiative(tickets)])
-    # built, planned, backlog, forge open: 2 shown, 2 hidden.
-    assert status_text(html) == "1 built·1 planned·+2·0/3 done"
-    assert '<span class="st-link">+2</span>' not in html  # a button, see below
+def test_row_shows_no_counts_or_status_words():
+    initiative = tree_initiative([{"state": "done"}, {"state": "in-progress"}])
+    initiative.top_tickets = [Ticket("9", "Top", "planned", None, None, False)]
+    row = row_html(render([initiative]))
+    assert not re.search(r"\d+/\d+ done|\+\d", row)
+    for word in ("done", "dropped", "in progress", "planned", "built", "backlog", "stale"):
+        assert word not in row
 
 
-def test_status_all_dropped_asks_to_confirm_close_without_done_count():
-    html = render([finished_tree(signals_initiative([{"state": "dropped"}]))])
-    assert status_text(html) == "confirm close or add work"
+def test_finished_row_shows_no_done_or_dropped_word_and_no_close():
+    for status in ("done", "dropped"):
+        row = row_html(render([plain(status=status)]))
+        assert status not in row
+        assert ">close<" not in row
+        assert ">resume<" in row
 
 
-def test_nothing_open_without_status_asks_to_confirm_close():
-    tickets = [{"state": "done"}] * 4
-    html = render([finished_tree(signals_initiative(tickets))])
-    assert cell(html, "c-status") == (
-        '<span class="st-muted">confirm close or add work</span><span class="sep">·</span>'
-        '<span class="done-n">4/4 done</span>'
-    )
-    assert "show-finished" not in markup(html)
+def test_plain_row_has_resume_on_top_and_close_under_it():
+    row = row_html(render([plain()]))
+    top_end = row.index("</div>", row.index('class="act-top"'))
+    assert row.index('class="act-top"') < row.index(">resume<") < top_end < row.index(">close<")
 
 
-def test_unknown_open_state_is_listed_not_confirm_close():
-    html = render([finished_tree(signals_initiative([{"state": "stuck"}]))])
-    assert status_text(html) == "1 stuck·0/1 done"
-    assert "confirm close" not in html
+def test_any_open_work_hides_close():
+    open_ticket = Ticket("1.2", "Open", "in progress", None, None, False)
+    cases = [
+        plain(top_tickets=[open_ticket]),
+        plain(tree=[TreeItem("epic", "epic-b", None, None, "open", tickets=[open_ticket])]),
+        plain(tree=[TreeItem("epic", "epic-c", None, None, "finished", tickets=[open_ticket])]),
+        plain(tree=[TreeItem("epic", "epic-d", None, None, "open")]),
+        plain(tree=[TreeItem("forge", "forge-a", "initiative-a/forge-a.md", None, "open")]),
+    ]
+    for initiative in cases:
+        assert ">close<" not in row_html(render([initiative]))
 
 
-def test_unknown_states_follow_backlog_in_first_appearance_order():
-    tickets = [{"state": "stuck"}, {"state": "backlog"}, {"state": "lost"},
-               {"state": "stuck"}, {"state": "done"}]
-    initiative = finished_tree(signals_initiative(tickets))
-    assert waiting_items(initiative) == [
-        ("1 backlog", "st-muted"), ("2 stuck", "st-muted"), ("1 lost", "st-muted")]
+def test_failed_tickets_keep_the_row_and_its_panel_with_the_failure_first():
+    html = render([plain(tickets=None, tree=[])])
+    row = row_html(html)
+    assert ">close<" not in row and ">resume<" in row
+    assert 'class="toggle"' in html
+    panel = html.split('<div class="panel" role="cell"')[1]
+    assert (panel.index("Couldn't read tickets: tickets.py failed")
+            < panel.index('role="table"'))
 
 
-def test_null_and_missing_state_count_as_no_state():
-    tickets = [{"state": None}, {}, {"state": "backlog"}]
-    initiative = finished_tree(signals_initiative(tickets))
-    assert waiting_items(initiative) == [("1 backlog", "st-muted"), ("2 no state", "st-muted")]
+def test_no_worktree_has_an_empty_actions_cell():
+    html = render([Initiative("initiative-a", "A", [], tickets=[], tree=[done_epic()])])
+    assert '<div class="c-btns" role="cell"></div>' in html
+    assert "no worktree" in row_html(html)
 
 
-def test_no_confirm_cue_when_tickets_unavailable():
-    html = render([finished_tree(signals_initiative(None))])
-    assert "confirm close" not in html
+def test_stale_activity_shows_stale_time_and_no_tag_on_the_row():
+    activity = Activity(NOW - timedelta(days=14), "", "memlog")
+    html = render([signals_initiative([{"state": "review"}], activity)])
+    assert '<span class="when is-stale"' in html
+    assert "stale-tag" not in row_html(html)
+
+
+def test_fresh_activity_is_not_stale():
+    activity = Activity(NOW - timedelta(days=13), "", "memlog")
+    html = render([signals_initiative([], activity)])
+    assert '<span class="when"' in html
+    assert "is-stale" not in row_html(html)
+
+
+def test_failed_tickets_keep_the_rest_of_the_row():
+    activity = Activity(NOW - timedelta(hours=3), "did", "memlog")
+    html = render([signals_initiative(None, activity)])
+    row = row_html(html)
+    assert ">3 h ago<" in row and "no worktree" in row
+    assert "Couldn't read" not in row
+    assert '<span class="when is-stale"' not in html
+
+
+# --- row actions: doc chips stacked under resume ---
+
+def spec_initiative(tickets=()) -> Initiative:
+    spec = TreeItem("spec", "spec-x", "initiative-a/spec-x/spec-x.md", NOW, "open")
+    return Initiative("initiative-a", "A", [], tickets=list(tickets), tree=[spec])
+
+
+def test_open_spec_and_forge_chips_stack_under_resume():
+    spec = TreeItem("spec", "spec-x", "initiative-a/spec-x/spec-x.md", NOW, "open")
+    forge = TreeItem("forge", "forge-a", "initiative-a/forge-a/forge-a.md", NOW, "open")
+    initiative = Initiative("initiative-a", "A", [Worktree(WT, "main")],
+                            tickets=[], tree=[forge, spec])
+    row = row_html(render([initiative]))
+    assert row.index('class="act-top"') < row.index(">resume<")
+    assert row.index(">resume<") < row.index(">resume forge<") < row.index(">slice spec<")
+    assert ">close<" not in row
+    assert 'class="st-link chip"' in row
+    slice_prompt = "/bmad-ticket Slice _bmad-output/initiative-a/spec-x/spec-x.md"
+    assert "q=" + quote(slice_prompt, safe="") in row
+
+
+def test_resume_forge_lists_every_open_forge_path():
+    forges = [TreeItem("forge", f"forge-{n}", f"initiative-a/forge-{n}/forge-{n}.md", NOW, "open")
+              for n in "ab"]
+    forges.append(TreeItem("forge", "forge-c", "initiative-a/forge-c/forge-c.md", NOW, "finished"))
+    initiative = Initiative("initiative-a", "A", [Worktree(WT, "main")], tickets=[], tree=forges)
+    prompt = ("/bmad-forge-idea Resume _bmad-output/initiative-a/forge-a/forge-a.md, "
+              "_bmad-output/initiative-a/forge-b/forge-b.md")
+    row = row_html(render([initiative]))
+    assert ">resume forge<" in row
+    assert "q=" + quote(prompt, safe="") in row
+
+
+def test_close_chip_names_the_initiative_and_its_label():
+    row = row_html(render([plain()]))
+    assert "q=" + quote("/bmad-ticket Close initiative-a, or plan more work", safe="") in row
+    assert 'aria-label="close: close initiative-a or plan more work in a new session"' in row
+
+
+def test_doc_chips_have_the_session_icon():
+    row = row_html(render([plain()]))
+    assert row.count('<svg class="i" aria-hidden="true"') == 2  # resume and close
+
+
+def test_no_worktree_shows_no_doc_actions_and_no_status_words():
+    html = render([spec_initiative()])
+    assert "claude://" not in html
+    assert "spec to slice" not in html and "confirm close" not in html
 
 
 # --- sort, finished, empty states ---
@@ -533,7 +596,7 @@ def test_finished_initiatives_hide_behind_show_finished():
     assert '<div id="finished" role="table" aria-label="Finished initiatives" hidden>' in rest
     assert slugs_in(rest) == ["closed", "gone"]
     assert rest.count('<div class="init is-finished" role="row">') == 2
-    assert '<div class="c-status" role="cell"><span class="done-n">done</span></div>' in rest
+    assert "c-status" not in rest
     assert '"Hide finished"' in html  # the script swaps the label
 
 
@@ -541,7 +604,7 @@ def test_finished_row_is_never_stale_and_ignores_tickets_failure():
     closed = at("closed", 24 * 30, "dropped")
     closed.tickets = None
     html = markup(render([closed]))
-    assert '<div class="c-status" role="cell"><span class="done-n">dropped</span></div>' in html
+    assert "dropped" not in html
     assert "stale" not in html
 
 
@@ -578,7 +641,7 @@ def test_only_top_tickets_still_get_a_caret_and_panel():
 def test_tickets_unavailable_has_no_top_tickets_and_shows_note():
     initiative = tree_initiative(None)
     html = render([initiative])
-    assert "tickets unavailable" in html
+    assert "Couldn't read tickets: tickets.py failed" in html
     assert initiative.top_tickets == []
 
 
@@ -586,12 +649,6 @@ def test_script_drops_vscode_failed_from_url():
     html = render([])
     assert "history.replaceState" in html
     assert 'params.has("vscode_failed")' in html
-
-
-def test_finished_row_keeps_done_count():
-    closed = at("closed", 1, "done")
-    closed.tickets = [{"state": "done"}, {"state": "dropped"}]
-    assert status_text(render([closed])) == "done·1/1 done"
 
 
 def test_script_keeps_finished_rows_closed_on_restore():
@@ -620,36 +677,6 @@ def test_no_initiatives_says_so_with_root():
     assert 'role="table"' not in html and "show-finished" not in html
 
 
-def test_status_tickets_unavailable_keeps_rest_of_row():
-    activity = Activity(NOW - timedelta(hours=3), "did", "memlog")
-    html = render([signals_initiative(None, activity)])
-    assert cell(html, "c-status") == (
-        '<span class="err">Couldn\'t read tickets: tickets.py failed</span>')
-    assert ">3 h ago<" in html
-    assert 'class="wt-name"' not in html and "no worktree" in html
-
-
-def test_stale_activity_tags_status_and_tints_time():
-    activity = Activity(NOW - timedelta(days=14), "", "memlog")
-    html = render([signals_initiative([{"state": "review"}], activity)])
-    assert cell(html, "c-status").endswith('<span class="stale-tag">stale</span>')
-    assert status_text(html) == "1 review·forge open·0/1 donestale"
-    assert '<span class="when is-stale"' in html
-
-
-def test_fresh_activity_has_no_stale_tag():
-    activity = Activity(NOW - timedelta(days=13), "", "memlog")
-    html = render([signals_initiative([], activity)])
-    assert "stale-tag" not in cell(html, "c-status")
-    assert '<span class="when"' in html
-
-
-def test_tickets_failed_still_shows_stale_tag():
-    activity = Activity(NOW - timedelta(days=20), "", "memlog")
-    html = render([signals_initiative(None, activity)])
-    assert cell(html, "c-status").endswith('<span class="stale-tag">stale</span>')
-
-
 # --- actions cell ---
 
 WT = Path("/x/my wt")
@@ -660,8 +687,8 @@ def test_resume_link_opens_claude_in_worktree_with_prompt():
     actions = cell(html, "c-btns")
     href = ("claude://code/new?folder=%2Fx%2Fmy%20wt"
             "&amp;q=%2Fbmad%20Resume%20work%20on%20initiative-a")
-    assert f'<a class="btn btn-1" href="{href}"' in actions
-    assert ">Resume</a>" in actions
+    assert f'<a class="btn btn-1 chip" href="{href}"' in actions
+    assert ">resume<" in actions
 
 
 def test_worktree_cell_posts_id_and_slug():
@@ -762,7 +789,7 @@ def test_pr_button_opens_lone_pr_in_new_tab():
     assert '<svg class="pr-icon pr-open" aria-hidden="true"' in actions
     assert '<span class="sr-only">open pull request </span>#7' in actions
     assert '<span class="sr-only"> (opens in new tab)</span>' in actions
-    assert actions.index(">Resume<") < actions.index(">#7<")
+    assert actions.index(">resume<") < actions.index(">#7<")
 
 
 def test_pr_button_shows_the_mapped_pr():
@@ -804,7 +831,7 @@ def test_github_failure_shows_header_line_and_no_pr_buttons():
     header = html.split('<header class="hdr">')[1].split("</header>")[0]
     assert header.endswith('<span class="err">Couldn\'t reach GitHub</span>')
     assert 'class="btn btn-2 pr"' not in html
-    assert ">Resume<" in html  # rest of the page unchanged
+    assert ">resume<" in html  # rest of the page unchanged
 
 
 def test_no_github_line_when_prs_known_or_empty():
@@ -828,13 +855,16 @@ def ticket_action_html(word, ready=False, worktrees=True, **extra):
 FOLDER = "folder=%2Fx%2Fmy%20wt"
 
 
+ICON = '<svg class="i" aria-hidden="true" viewBox="0 0 16 16"><path d="M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z"/><path d="m5.5 6.5 1.5 1.25-1.5 1.25M8.5 9h2"/></svg>'
+
+
 def test_ready_ticket_shows_start_link():
     html = ticket_action_html("planned", ready=True)
     assert html == (
-        f'<span role="cell"><a class="st-link" href="claude://code/new?{FOLDER}'
+        f'<span role="cell"><a class="st-link chip" href="claude://code/new?{FOLDER}'
         '&amp;q=%2Fbmad-build%204.2%20Ticket%20actions" '
-        'aria-label="start 4.2 Ticket actions">start</a></span>')
-    assert ">start</a>" in ticket_action_html("backlog", ready=True)
+        'aria-label="start 4.2 Ticket actions">start' + ICON + '</a></span>')
+    assert ">start<svg" in ticket_action_html("backlog", ready=True)
 
 
 def test_not_ready_planned_is_a_status():
@@ -845,13 +875,13 @@ def test_in_progress_and_in_review_show_resume():
     for word in ("in progress", "in review"):
         html = ticket_action_html(word)
         assert ('q=%2Fbmad-build%20Resume%204.2%20Ticket%20actions" '
-                'aria-label="resume 4.2 Ticket actions">resume</a>') in html
-        assert 'class="st-link"' in html
+                'aria-label="resume 4.2 Ticket actions">resume<svg') in html
+        assert 'class="st-link chip"' in html
 
 
 def test_blocked_shows_warm_unblock_with_reason():
     html = ticket_action_html("blocked", blocked_reason="needs x")
-    assert 'class="st-warm"' in html and ">unblock</a>" in html
+    assert 'class="st-warm chip"' in html and ">unblock<svg" in html
     assert 'aria-label="unblock 4.2 Ticket actions"' in html
     assert "Resume%204.2%20Ticket%20actions%3A%20blocked%3A%20needs%20x" in html
     bare = ticket_action_html("blocked")
@@ -860,7 +890,7 @@ def test_blocked_shows_warm_unblock_with_reason():
 
 def test_no_state_shows_fix():
     html = ticket_action_html("no state")
-    assert ">fix</a>" in html and 'class="st-link"' in html
+    assert ">fix<svg" in html and 'class="st-link chip"' in html
     assert "q=%2Fbmad-ticket%20Check%204.2%20Ticket%20actions%3A%20it%20has%20no%20state" in html
 
 
@@ -916,14 +946,14 @@ def hrefs(cell_html):
 def test_to_close_epic_is_one_close_link():
     html = item_cells(epic_item("to close", "epic-dashboard"))[0]
     assert html == (
-        f'<span role="cell"><a class="st-link" href="claude://code/new?{FOLDER}'
+        f'<span role="cell"><a class="st-link chip" href="claude://code/new?{FOLDER}'
         '&amp;q=%2Fbmad-ticket%20Close%20epic-dashboard" '
-        'aria-label="close: close epic-dashboard in a new session">close</a></span>')
+        'aria-label="close: close epic-dashboard in a new session">close' + ICON + '</a></span>')
 
 
 def test_not_started_epic_has_start_and_auto():
     html = item_cells(epic_item("not started", "epic-several-projects"))[0]
-    assert ">start</a>" in html and ">auto</a>" in html
+    assert ">start<svg" in html and ">auto<svg" in html
     assert 'class="sep">·</span>' in html
     start, auto = hrefs(html)
     assert start == "/bmad Start work on epic-several-projects"
@@ -933,7 +963,7 @@ def test_not_started_epic_has_start_and_auto():
 
 def test_in_progress_epic_has_resume_and_auto_and_addresses_rejected_retro():
     html = item_cells(epic_item("in progress"))[0]
-    assert ">resume</a>" in html and ">auto</a>" in html
+    assert ">resume<svg" in html and ">auto<svg" in html
     assert hrefs(html)[0] == "/bmad Resume work on epic-x"
     rejected = item_cells(epic_item("in progress", retro_word="rejected"))[0]
     assert hrefs(rejected)[0] == (
@@ -968,12 +998,12 @@ def test_retro_open_items_shows_plan_items():
     assert hrefs(html) == [
         "/bmad-ticket Turn the action items in "
         "_bmad-output/initiative-a/epic-x/epic-x-retrospective.md into tickets"]
-    assert ">plan items</a>" in html and 'class="st-link"' in html
+    assert ">plan items<svg" in html and 'class="st-link chip"' in html
 
 
 def test_retro_rejected_shows_fix_with_the_resume_prompt():
     html = item_cells(epic_item("in progress", retro_word="rejected"))[1]
-    assert ">fix</a>" in html
+    assert ">fix<svg" in html
     assert hrefs(html) == [
         "/bmad Resume work on epic-x: address "
         "_bmad-output/initiative-a/epic-x/epic-x-retrospective.md"]
@@ -1032,103 +1062,6 @@ def test_no_epic_or_retro_link_without_worktree():
             assert "<a " not in html
     assert item_cells(epic_item("to retro", retro_word="open items"), worktrees=False)[1] == (
         '<span role="cell" class="st-muted">open items</span>')
-
-
-# --- status sentence actions ---
-
-STATUS_WT = Worktree(Path("/wt dir"), "main")
-
-
-def status_of(initiative: Initiative, worktree: Worktree | None = STATUS_WT) -> str:
-    initiative.worktrees = [worktree] if worktree else []
-    return cell(render([initiative]), "c-status")
-
-
-def claude_links(status: str) -> list[str]:
-    return re.findall(r'<a class="st-link" href="([^"]+)" aria-label="([^"]+)">([^<]+)</a>',
-                      status)
-
-
-def spec_initiative(tickets=()) -> Initiative:
-    spec = TreeItem("spec", "spec-x", "initiative-a/spec-x/spec-x.md", NOW, "open")
-    return Initiative("initiative-a", "A", [], tickets=list(tickets), tree=[spec])
-
-
-def test_counts_are_statuses_never_blue_or_links():
-    for tickets, expected in [
-        ([{"state": "x", "status": "blocked"}], '<span class="st-warm">1 blocked</span>'),
-        ([{"state": "review", "status": "built"}], '<span class="st-built">1 built</span>'),
-        ([{}], '<span class="st-muted">1 no state</span>'),
-        ([{"state": "in-progress"}], '<span class="st-muted">1 in progress</span>'),
-        ([{"state": "planned"}], '<span class="st-muted">1 planned</span>'),
-    ]:
-        for worktree in (STATUS_WT, None):
-            status = status_of(finished_tree(signals_initiative(tickets)), worktree)
-            assert expected in status
-            assert "<a " not in status and "st-link" not in status
-
-
-def test_slice_spec_link_with_worktree():
-    links = claude_links(status_of(spec_initiative()))
-    assert len(links) == 1
-    href, label, text = links[0]
-    assert text == "slice spec"
-    assert label == "slice spec: slice the open spec in a new session"
-    prompt = "/bmad-ticket Slice _bmad-output/initiative-a/spec-x/spec-x.md"
-    assert href == f"claude://code/new?folder={quote('/wt dir', safe='')}&amp;q={quote(prompt, safe='')}"
-
-
-def test_resume_forge_lists_every_open_forge_path():
-    forges = [TreeItem("forge", f"forge-{n}", f"initiative-a/forge-{n}/forge-{n}.md", NOW, "open")
-              for n in "ab"]
-    forges.append(TreeItem("forge", "forge-c", "initiative-a/forge-c/forge-c.md", NOW, "finished"))
-    initiative = Initiative("initiative-a", "A", [], tickets=[], tree=forges)
-    (href, label, text), = claude_links(status_of(initiative))
-    assert text == "resume forge"
-    prompt = ("/bmad-forge-idea Resume _bmad-output/initiative-a/forge-a/forge-a.md, "
-              "_bmad-output/initiative-a/forge-b/forge-b.md")
-    assert unquote(href).endswith("q=" + prompt)
-
-
-def test_close_link_only_when_nothing_open():
-    initiative = Initiative("initiative-a", "A", [], tickets=[{"state": "done"}])
-    (href, label, text), = claude_links(status_of(initiative))
-    assert text == "close"
-    assert unquote(href).endswith("q=/bmad-ticket Close initiative-a, or plan more work")
-    assert label == "close: close initiative-a or plan more work in a new session"
-    # A count or an open spec means no `close`.
-    assert "close" not in status_of(Initiative("initiative-a", "A", [], tickets=[{"state": "backlog"}]))
-    assert "close" not in status_of(spec_initiative([{"state": "done"}]))
-
-
-def test_no_worktree_shows_old_words_as_grey_statuses():
-    status = status_of(spec_initiative(), None)
-    assert "claude://" not in status and "<a " not in status
-    assert '<span class="st-muted">spec to slice</span>' in status
-    done = Initiative("initiative-a", "A", [], tickets=[{"state": "done"}])
-    assert '<span class="st-muted">confirm close or add work</span>' in status_of(done, None)
-
-
-def test_tickets_failed_has_no_waiting_items():
-    status = status_of(finished_tree(signals_initiative(None)))
-    assert "Couldn&#x27;t read tickets" in status or "Couldn't read tickets" in status
-    assert "<a " not in status
-
-
-def test_plus_n_is_a_button_that_targets_the_panel_without_a_worktree():
-    tickets = [{"state": "backlog"}, {"state": "planned"}, {"state": "stuck"}]
-    status = status_of(signals_initiative(tickets), None)
-    assert ('<button type="button" class="more st-link" data-open-panel="panel-0">+2</button>'
-            in status)
-    assert 'id="panel-0"' in render([signals_initiative(tickets)])
-
-
-def test_plus_n_is_a_grey_span_without_a_panel():
-    initiative = Initiative("initiative-a", "A", [],
-                            tickets=[{"state": "backlog"}, {"state": "planned"}, {"state": "stuck"}])
-    status = status_of(initiative)
-    assert '<span class="st-muted">+1</span>' in status
-    assert "data-open-panel" not in status and "<button" not in status
 
 
 # --- closed tickets behind a button ---
@@ -1233,11 +1166,13 @@ def test_open_epic_blocks_initiative_close():
     initiative = finished_tree(signals_initiative([{"state": "done"}]))
     initiative.tree[1].state = "open"
     assert "close" not in [a[0] for a in doc_actions(initiative)]
-    assert status_text(render([initiative])) != "confirm close or add work"
 
 
 def test_finished_epics_allow_initiative_close():
     initiative = finished_tree(signals_initiative([{"state": "done"}]))
+    for item in initiative.tree:  # every ticket of the epic done, nothing open
+        if item.kind == "epic":
+            item.tickets = [tk("1.1", "done")]
     assert [a[0] for a in doc_actions(initiative)] == ["close"]
 
 

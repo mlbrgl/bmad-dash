@@ -46,19 +46,6 @@
     });
   });
 
-  // `+n` in the Status sentence opens the row's tree.
-  Array.prototype.forEach.call(document.querySelectorAll("[data-open-panel]"), function (more) {
-    more.addEventListener("click", function () {
-      var id = more.getAttribute("data-open-panel");
-      toggles.forEach(function (toggle) {
-        if (toggle.getAttribute("aria-controls") === id) {
-          setOpen(toggle, true);
-          save();
-        }
-      });
-    });
-  });
-
   // Show finished (n) <-> Hide finished. Not remembered.
   var more = document.getElementById("show-finished");
   if (more) {

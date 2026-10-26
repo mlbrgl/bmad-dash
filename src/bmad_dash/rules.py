@@ -1,21 +1,20 @@
 """Status rules for a dashboard row, as plain data (no HTML).
 
 Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-rules.md`
-(Row, Status sentence, Stack's last PR):
+(Row, Stack's last PR):
 
 - Rows sort by newest last activity first, then those without activity.
 - A row is stale when its last activity is `STALE_AFTER` old or older,
   unless the initiative is finished.
-- The Status sentence lists ticket counts by word (`ticket_word`, the tree's
-  word; statuses, coloured by `status_class`, never blue), then the doc actions
-  `resume forge`, `slice spec`, `close` (`doc_actions`). At most `MAX_WAITING`
-  show, then `+n`. Done and dropped are not counted. Words go in `WORD_ORDER`
-  first (every `waits on ...` counts as `waiting`), then any other word in the
-  order it first appears. Without a worktree an action shows its old word
-  (`FALLBACK_WORDS`) as a grey status.
+- The row's Actions are its doc actions (`doc_actions`), stacked under
+  `resume`: `resume forge` (any open forge), `slice spec` (any spec with no
+  `tickets.toml` beside it), and `close`. `close` shows only when the
+  initiative is not finished, its tickets loaded, no ticket open at any level
+  (the tree or the initiative folder), and no epic open. Counts play no part.
+  Without a worktree the row shows no actions.
 - Statuses have three colours (`status_class`): green built, grey (the
   default) nothing to do, warm blocked. Actions are blue, warm for `unblock`
-  (`action_css`).
+  (`action_css`). Tree cells only: the row has no status words.
 - A retro's `open items` reads `accepted` under a finished epic (`retro_word`).
 - A finished initiative's tree shows no stale tags.
 - The PR button shows the PR of the highest branch that has one, in the
@@ -34,7 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence, Set
 from datetime import datetime
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 from bmad_dash.prs import PullRequest, last_pr
 from bmad_dash.tree import (
@@ -43,27 +42,17 @@ from bmad_dash.tree import (
     Ticket,
     TreeItem,
     is_old,
-    ticket_counts,
-    ticket_word,
 )
 
 if TYPE_CHECKING:  # types only: initiatives.py imports this module
     from bmad_dash.initiatives import Initiative, Worktree
     from bmad_dash.stack import GraphiteStack
 
-# Ticket words, in the order the Status sentence lists them.
-WORD_ORDER = ["blocked", "built", "in review", "in progress", "planned", "backlog", "waiting"]
 # CSS classes of the four word colours.
 LINK = "st-link"  # blue: act
 BUILT = "st-built"  # green
 MUTED = "st-muted"  # grey: nothing to do
 WARM = "st-warm"  # needs attention
-WAITS_ON = "waits on "
-MAX_WAITING = 2
-# Grey words the doc actions show when there is no worktree.
-FORGE_WORD = "forge open"
-SPEC_WORD = "spec to slice"
-CONFIRM_CLOSE = "confirm close or add work"
 
 
 def is_stale(initiative: Initiative, now: datetime) -> bool:
@@ -221,11 +210,6 @@ def item_actions(item: TreeItem, epic: TreeItem | None) -> list[Action]:
     return []
 
 
-def count_word(word: str) -> str:
-    """The word a ticket is counted under: every `waits on ...` is `waiting`."""
-    return "waiting" if word.startswith(WAITS_ON) else word
-
-
 def status_class(word: str) -> str:
     """The colour of a status: `blocked` warm, `built` green, else grey.
     A status is never blue."""
@@ -236,21 +220,25 @@ def status_class(word: str) -> str:
     return MUTED
 
 
-def waiting_items(initiative: Initiative) -> list[tuple[str, str]]:
-    """Ticket counts by word, as (text, colour class)."""
-    counts: dict[str, int] = {}
-    for ticket in initiative.tickets:
-        word = ticket_word(ticket, initiative.next_info)
-        if word in CLOSED_STATES:
-            continue
-        key = count_word(word)
-        counts[key] = counts.get(key, 0) + 1
-    others = [word for word in counts if word not in WORD_ORDER]
-    return [
-        (f"{counts[word]} {word}", status_class(word))
-        for word in WORD_ORDER + others
-        if word in counts
-    ]
+def has_open_ticket(items: list[TreeItem]) -> bool:
+    """Any epic ticket at any depth that is not done or dropped."""
+    return any(
+        any(t.word not in CLOSED_STATES for t in item.tickets) or has_open_ticket(item.children)
+        for item in items
+    )
+
+
+def can_close(initiative: Initiative) -> bool:
+    """`close` needs: tickets loaded, not finished, no open ticket in the tree
+    or at the initiative level, and no open epic. Forges and specs are checked
+    by the caller (they are actions of their own)."""
+    return (
+        initiative.tickets is not None
+        and not initiative.finished
+        and not any(t.word not in CLOSED_STATES for t in initiative.top_tickets)
+        and not has_open_ticket(initiative.tree)
+        and not has_open(initiative.tree, "epic")
+    )
 
 
 def open_paths(items: list[TreeItem], kind: str) -> list[str]:
@@ -265,8 +253,8 @@ def open_paths(items: list[TreeItem], kind: str) -> list[str]:
 
 
 def doc_actions(initiative: Initiative) -> list[Action]:
-    """The Status sentence's doc actions: `resume forge`, `slice spec`, and
-    `close` (only with no counts, every epic finished and nothing else open)."""
+    """The row's actions, stacked under `resume`: `resume forge`, `slice spec`,
+    and `close` (only when `can_close`, and no forge or spec is open)."""
     actions = []
     forges = open_paths(initiative.tree, "forge")
     specs = open_paths(initiative.tree, "spec")
@@ -278,54 +266,11 @@ def doc_actions(initiative: Initiative) -> list[Action]:
         actions.append(make_action(
             "slice spec", f"/bmad-ticket Slice {', '.join(specs)}",
             "slice the open spec"))
-    if (not actions and not waiting_items(initiative)
-            and not has_open(initiative.tree, "epic")):
+    if not actions and can_close(initiative):
         actions.append(make_action(
             "close", f"/bmad-ticket Close {initiative.slug}, or plan more work",
             f"close {initiative.slug} or plan more work"))
     return actions
-
-
-# What a doc action shows as a grey status when there is no worktree.
-FALLBACK_WORDS = {
-    "resume forge": FORGE_WORD,
-    "slice spec": SPEC_WORD,
-    "close": CONFIRM_CLOSE,
-}
-
-
-class StatusItem(NamedTuple):
-    """One Status sentence item. `action` is set for doc actions; `fallback`
-    is the grey word shown instead when there is no worktree."""
-    text: str
-    css_class: str
-    action: Action | None = None
-    fallback: str = ""
-
-
-def status_parts(
-    initiative: Initiative,
-) -> tuple[list[StatusItem], tuple[int, int] | None]:
-    """What the Status sentence says.
-
-    Returns (waiting, done_count):
-    - waiting: up to `MAX_WAITING` items (counts, then doc actions), then `+n`
-      (no action). Empty when tickets didn't load.
-    - done_count: (done, total), or None when there are no counted tickets.
-    """
-    waiting: list[StatusItem] = []
-    if initiative.tickets is not None:
-        everything = [StatusItem(text, css) for text, css in waiting_items(initiative)]
-        for action in doc_actions(initiative):
-            everything.append(StatusItem(
-                action[0], LINK, action, FALLBACK_WORDS[action[0]]))
-        waiting = everything[:MAX_WAITING]
-        hidden = len(everything) - len(waiting)
-        if hidden:
-            waiting.append(StatusItem(f"+{hidden}", LINK))
-    counts = ticket_counts(initiative.tickets)
-    done_count = counts if counts and counts[1] > 0 else None
-    return waiting, done_count
 
 
 def tree_shows_stale(initiative: Initiative) -> bool:

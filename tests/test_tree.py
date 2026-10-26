@@ -764,7 +764,7 @@ def test_failing_tickets_py_shows_unavailable_on_page(tmp_path):
     write_fake_tickets_py(root, "import sys\nsys.exit(1)\n")
 
     html = render_page(list_initiatives(root, now=NOW), [root])
-    assert "tickets unavailable" in html
+    assert "Couldn't read tickets: tickets.py failed" in html
 
 
 def test_null_and_missing_state_read_as_no_state_in_tree_and_status(tmp_path):
@@ -779,8 +779,6 @@ def test_null_and_missing_state_read_as_no_state_in_tree_and_status(tmp_path):
 
     html = render_page(list_initiatives(root, now=NOW), [root])
     assert html.count('<span role="cell" class="st-muted">no state</span>') == 2
-    assert '<span class="st-muted">2 no state</span>' in html
-    assert "0/2 done" in html
 
 
 # --- frontmatter edge cases (shared `split_frontmatter`) ---
@@ -966,10 +964,6 @@ def project_with_next(tmp_path: Path, tickets: list[dict], next_output: str, nex
     return root
 
 
-def status_cell_of(html: str) -> str:
-    return re.search(r'<div class="c-status" role="cell">(.*?)</div>', html).group(1)
-
-
 def test_page_shows_words_colours_and_waiting_count(tmp_path):
     tickets = [
         {**ticket("1.1", "review"), "status": "built"},
@@ -987,12 +981,6 @@ def test_page_shows_words_colours_and_waiting_count(tmp_path):
     assert '<span role="cell" class="st-muted">waits on 1.2</span>' in html
     assert '<span role="cell" class="st-warm">blocked</span>' in html
     # Order: blocked, built, planned (ready: blue), waiting (grey); two shown, then +n.
-    assert status_cell_of(html) == (
-        '<span class="st-warm">1 blocked</span><span class="sep">·</span>'
-        '<span class="st-built">1 built</span><span class="sep">·</span>'
-        '<button type="button" class="more st-link" data-open-panel="panel-0">+2</button>'
-        '<span class="sep">·</span><span class="done-n">0/4 done</span>'
-    )
 
 
 def test_failing_next_keeps_tree_and_counts_without_waits_or_ready(tmp_path):
@@ -1002,12 +990,7 @@ def test_failing_next_keeps_tree_and_counts_without_waits_or_ready(tmp_path):
     html = render_page(list_initiatives(root, now=NOW), [root])
     assert html.count('<span role="cell" class="st-muted">planned</span>') == 2
     assert "waits on" not in html
-    assert status_cell_of(html) == (
-        '<span class="st-muted">2 planned</span><span class="sep">·</span>'
-        '<span class="done-n">1/3 done</span>'
-    )
-    assert "1/3 done" in html
-    assert "tickets unavailable" not in html
+    assert "Couldn't read tickets" not in html
 
 
 def test_failing_next_with_a_worktree_offers_no_start_but_ready_next_does(tmp_path):
@@ -1052,4 +1035,4 @@ def test_done_epic_with_an_open_ticket_and_current_open_items_retro_shows_plan_i
         set_epic_status(epic, "done")
         write_dated_retro(epic, "accepted-with-open-items", NOW - timedelta(days=1))
     html = page_of(tmp_path, [ticket("1.1", "in-progress")], setup)
-    assert ">plan items</a>" in html
+    assert ">plan items<svg" in html

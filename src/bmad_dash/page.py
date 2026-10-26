@@ -1,8 +1,9 @@
 """Build the dashboard HTML.
 
-The page is a server-rendered ARIA grid. Each initiative is one row of five
-cells, with its tree as a full-width panel under it. The only script opens
-and closes panels, reveals closed tickets, and remembers which panels are open.
+The page is a server-rendered ARIA grid. Each initiative is one row of four
+cells (Initiative, Worktree, Last activity, Actions), with its tree as a
+full-width panel under it. The only script opens and closes panels, reveals
+closed tickets, and remembers which panels are open.
 
 What a row says comes from `rules.py`; this module only turns it into HTML.
 The CSS and JS live in `assets/` and are inlined.
@@ -21,16 +22,15 @@ from bmad_dash.prs import PullRequest
 from bmad_dash.rules import (
     LINK,
     MUTED,
-    StatusItem,
     action_css,
     action_prompt,
     by_activity,
+    doc_actions,
     is_stale,
     item_actions,
     item_word,
     resume_prompt,
     status_class,
-    status_parts,
     ticket_action,
     tree_shows_stale,
 )
@@ -228,18 +228,20 @@ def item_rows(
 
 
 TREE_HEADS = ["kind", "name", "status", "updated"]
+TICKETS_FAILED = "Couldn't read tickets: tickets.py failed"
 
 
 def has_panel(initiative: Initiative) -> bool:
     """A row has a tree panel (and a caret) when its tree or its
-    initiative-level tickets have anything to show."""
-    return bool(initiative.tree or initiative.top_tickets)
+    initiative-level tickets have anything to show, or when tickets failed:
+    the panel then says so."""
+    return bool(initiative.tree or initiative.top_tickets or initiative.tickets is None)
 
 
 def panel_content(initiative: Initiative, now: datetime) -> str:
     note = ""
     if initiative.tickets is None:
-        note = '<p class="muted t-note">tickets unavailable</p>'
+        note = f'<p class="err t-note">{TICKETS_FAILED}</p>'
     heads = "".join(f'<span role="columnheader">{h}</span>' for h in TREE_HEADS)
     rows = [f'<div class="t-row t-head" role="row">{heads}</div>']
     show_stale = tree_shows_stale(initiative)
@@ -339,47 +341,12 @@ def activity_cell(initiative: Initiative, now: datetime) -> str:
 
 SEP = '<span class="sep">·</span>'
 
-TICKETS_FAILED = "Couldn't read tickets: tickets.py failed"
-
-
-def status_item(item: StatusItem, worktree: Worktree | None, panel_id: str | None) -> str:
-    """A count as a span; a doc action as a link with a worktree, else its old
-    word as a grey status; `+n` as a button that opens the row's tree, or a
-    grey span when there is none."""
-    if item.action is not None:
-        if worktree is None:
-            return f'<span class="{MUTED}">{escape(item.fallback)}</span>'
-        text, prompt, label = item.action
-        return action_link(worktree, prompt, text, item.css_class, label)
-    if item.text.startswith("+"):
-        if panel_id is None:  # no tree to open: inert
-            return f'<span class="{MUTED}">{escape(item.text)}</span>'
-        return (
-            f'<button type="button" class="more {item.css_class}"'
-            f' data-open-panel="{panel_id}">{escape(item.text)}</button>'
-        )
-    return f'<span class="{item.css_class}">{escape(item.text)}</span>'
-
-
-def status_cell(initiative: Initiative, now: datetime, panel_id: str | None = None) -> str:
-    """The Status sentence: up to 2 waiting items then `+n`, `x/y done`, stale tag.
-
-    A finished initiative shows its status word (`done` / `dropped`) instead of
-    waiting items; it comes from the initiative file, so it shows even when
-    `tickets.py` failed.
-    """
-    waiting, done_count = status_parts(initiative)
-    if initiative.finished:
-        parts = [f'<span class="done-n">{escape(initiative.status)}</span>']
-    elif initiative.tickets is None:
-        parts = [f'<span class="err">{TICKETS_FAILED}</span>']
-    else:
-        worktree = initiative.worktrees[0] if initiative.worktrees else None
-        parts = [status_item(item, worktree, panel_id) for item in waiting]
-    if done_count is not None:  # no `x/y done` without counted tickets
-        parts.append(f'<span class="done-n">{done_count[0]}/{done_count[1]} done</span>')
-    tag = '<span class="stale-tag">stale</span>' if is_stale(initiative, now) else ""
-    return f'<div class="c-status" role="cell">{SEP.join(parts)}{tag}</div>'
+# The session bubble (mockups/dashboard.html, `session`), inlined: colour follows the text.
+SESSION_ICON = (
+    '<svg class="i" aria-hidden="true" viewBox="0 0 16 16">'
+    '<path d="M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z"/>'
+    '<path d="m5.5 6.5 1.5 1.25-1.5 1.25M8.5 9h2"/></svg>'
+)
 
 
 def claude_href(worktree: Worktree, prompt: str) -> str:
@@ -392,16 +359,19 @@ def claude_href(worktree: Worktree, prompt: str) -> str:
 def action_link(
     worktree: Worktree, prompt: str, text: str, css_class: str, label: str
 ) -> str:
+    """An action as a chip: the verb, then the session icon. `css_class` adds
+    the colour (or the Resume fill)."""
     href = escape(claude_href(worktree, prompt))
     return (
-        f'<a class="{css_class}" href="{href}" aria-label="{escape(label)}">'
-        f"{escape(text)}</a>"
+        f'<a class="{css_class} chip" href="{href}" aria-label="{escape(label)}">'
+        f"{escape(text)}{SESSION_ICON}</a>"
     )
 
 
 def resume_link(worktree: Worktree, slug: str) -> str:
     prompt = resume_prompt(slug)
-    return action_link(worktree, prompt, "Resume", "btn btn-1", prompt.removeprefix("/bmad "))
+    return action_link(worktree, prompt, "resume", "btn btn-1",
+                       f"resume {slug} in a new session")
 
 
 # GitHub's 16px octicons, path data from @primer/octicons 19.15.0 (MIT).
@@ -433,13 +403,18 @@ def pr_link(pr: PullRequest) -> str:
 
 
 def actions_cell(initiative: Initiative, pr: PullRequest | None = None) -> str:
-    """Resume and, when known, the stack's last PR. Nothing without a worktree."""
-    parts = []
-    if initiative.worktrees:
-        parts.append(resume_link(initiative.worktrees[0], initiative.slug))
-        if pr is not None:
-            parts.append(pr_link(pr))
-    return f'<div class="c-btns" role="cell">{"".join(parts)}</div>'
+    """`resume` with the stack's last PR beside it on top, the doc actions
+    stacked under it. Empty without a worktree."""
+    if not initiative.worktrees:
+        return '<div class="c-btns" role="cell"></div>'
+    worktree = initiative.worktrees[0]
+    top = [resume_link(worktree, initiative.slug)]
+    if pr is not None:
+        top.append(pr_link(pr))
+    lines = [f'<div class="act-top">{"".join(top)}</div>']
+    for text, prompt, label in doc_actions(initiative):
+        lines.append(action_link(worktree, prompt, text, LINK, label))
+    return f'<div class="c-btns" role="cell">{"".join(lines)}</div>'
 
 
 def initiative_row(
@@ -450,16 +425,15 @@ def initiative_row(
     vscode_failed: str = "",
     prs: Mapping[str, PullRequest] = NO_PRS,
 ) -> str:
-    """One grid row. DOM order: the five cells, then the panel, so Tab runs
-    caret -> worktree -> Resume -> PR -> tree links. CSS puts the panel on
-    grid row 2."""
+    """One grid row. DOM order: the four cells, then the panel, so Tab runs
+    caret -> worktree -> resume -> PR -> doc chips -> tree links. CSS puts the
+    panel on grid row 2."""
     panel_id = f"panel-{index}"
     is_open = is_open and has_panel(initiative)
     cells = [
         initiative_cell(initiative, panel_id, is_open),
         worktree_cell(initiative, vscode_failed),
         activity_cell(initiative, now),
-        status_cell(initiative, now, panel_id if has_panel(initiative) else None),
         actions_cell(initiative, prs.get(initiative.key)),
     ]
     if has_panel(initiative):
@@ -468,7 +442,7 @@ def initiative_row(
     return f'<div class="{css_class}" role="row">{"".join(cells)}</div>'
 
 
-COLUMN_HEADS = ["Initiative", "Worktree", "Last activity", "Status", "Actions"]
+COLUMN_HEADS = ["Initiative", "Worktree", "Last activity", "Actions"]
 
 
 def header_row() -> str:

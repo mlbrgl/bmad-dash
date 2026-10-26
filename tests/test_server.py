@@ -34,7 +34,8 @@ def test_serves_dashboard_at_root(server):
     assert "feature-a" in html
     # wt-b (detached) loses initiative-shared to the main checkout, listed first.
     assert "detached" not in html
-    assert html.count('role="row"') == 1 + 5
+    # No tickets.py here: each row has a failed-tickets panel with its own header row.
+    assert html.count('class="init') == 5
 
 
 def test_no_github_remote_shows_no_github_line(server):
