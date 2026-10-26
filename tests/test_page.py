@@ -437,6 +437,44 @@ def test_activity_without_text_shows_time_only():
     assert cell(html, "c-act") == '<span class="when" title="2026-10-19 09:00">3 h ago</span>'
 
 
+def activity_initiative(activity: Activity) -> Initiative:
+    initiative = signals_initiative([], activity)
+    initiative.project = "my proj"
+    return initiative
+
+
+def test_memlog_activity_links_to_its_memlog():
+    activity = Activity(NOW - timedelta(hours=1), "<b>did</b>", "memlog",
+                        "initiative-a/forge-a/.memlog.md")
+    html = render([activity_initiative(activity)])
+    assert cell(html, "c-act").endswith(
+        '<a class="what" href="/file/my%20proj/initiative-a/forge-a/.memlog.md"'
+        ' title="&lt;b&gt;did&lt;/b&gt;">&lt;b&gt;did&lt;/b&gt;</a>')
+
+
+def test_plan_activity_links_to_its_plan():
+    activity = Activity(NOW - timedelta(hours=1), "story-a-plan.md", "plan",
+                        "initiative-a/epic-a/story-a-plan.md")
+    html = render([activity_initiative(activity)])
+    assert ('<a class="what" href="/file/my%20proj/initiative-a/epic-a/story-a-plan.md"'
+            ' title="story-a-plan.md">story-a-plan.md</a>') in cell(html, "c-act")
+
+
+def test_commit_activity_is_plain_text():
+    activity = Activity(NOW - timedelta(hours=1), "feat: x", "commit")
+    html = render([activity_initiative(activity)])
+    assert cell(html, "c-act").endswith('<span class="what" title="feat: x">feat: x</span>')
+    assert "<a" not in cell(html, "c-act")
+
+
+def test_what_changed_clamps_to_two_lines():
+    css = (Path(__file__).parents[1] / "src/bmad_dash/assets/page.css").read_text()
+    what = re.search(r"\n\.what \{([^}]*)\}", css).group(1)
+    assert "-webkit-line-clamp: 2" in what
+    assert "display: -webkit-box" in what
+    assert "nowrap" not in what
+
+
 def test_no_activity_shows_none():
     html = render([signals_initiative([])])
     assert cell(html, "c-act") == '<span class="muted">none</span>'

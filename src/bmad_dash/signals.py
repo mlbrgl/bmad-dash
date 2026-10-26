@@ -24,6 +24,9 @@ class Activity:
     when: datetime
     text: str  # display only
     source: str  # "memlog", "plan" or "commit"
+    # The source file, relative to `_bmad-output/`, for the file view link;
+    # None for a commit.
+    path: str | None = None
 
 
 def last_bullet(memlog: Path) -> str:
@@ -40,12 +43,18 @@ def last_bullet(memlog: Path) -> str:
     return bullets[-1].removeprefix("- ").strip()
 
 
+def output_path(file: Path, initiative_dir: Path) -> str:
+    """`file` relative to `_bmad-output/`, the initiative folder's parent."""
+    return file.relative_to(initiative_dir.parent).as_posix()
+
+
 def memlog_activities(initiative_dir: Path) -> list[Activity]:
     activities = []
     for memlog in sorted(initiative_dir.rglob(".memlog.md")):
         _, updated = read_memlog(memlog.parent)
         if updated is not None:
-            activities.append(Activity(updated, last_bullet(memlog), "memlog"))
+            path = output_path(memlog, initiative_dir)
+            activities.append(Activity(updated, last_bullet(memlog), "memlog", path))
     return activities
 
 
@@ -55,7 +64,7 @@ def plan_activities(initiative_dir: Path) -> list[Activity]:
         mtime = file_mtime(plan)
         if mtime is None:
             continue
-        activities.append(Activity(mtime, plan.name, "plan"))
+        activities.append(Activity(mtime, plan.name, "plan", output_path(plan, initiative_dir)))
     return activities
 
 

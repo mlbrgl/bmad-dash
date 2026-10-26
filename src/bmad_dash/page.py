@@ -65,10 +65,11 @@ def relative_time(when: datetime, now: datetime) -> str:
 # --- tree panel ---
 # Its own grid: kind · name · status · updated. Nesting indents the name only.
 
-def file_link(project: str, path: str, text: str, css_class: str) -> str:
+def file_link(project: str, path: str, text: str, css_class: str, title: str = "") -> str:
     """The one place a file href is built: `/file/<project>/<path>`."""
     href = escape("/file/" + quote(project) + "/" + quote(path))
-    return f'<a class="{css_class}" href="{href}">{escape(text)}</a>'
+    title_attr = f' title="{escape(title)}"' if title else ""
+    return f'<a class="{css_class}" href="{href}"{title_attr}>{escape(text)}</a>'
 
 
 def name_cell(
@@ -354,7 +355,12 @@ def activity_cell(initiative: Initiative, now: datetime) -> str:
             f'<span class="{when_class}" title="{activity.when:%Y-%m-%d %H:%M}">'
             f"{relative_time(activity.when, now)}</span>"
         )
-        if activity.text:
+        # A memlog entry or plan links to its file; a commit subject is plain text.
+        if activity.text and activity.path:
+            inner += file_link(
+                initiative.project, activity.path, activity.text, "what", activity.text
+            )
+        elif activity.text:
             text = escape(activity.text)
             inner += f'<span class="what" title="{text}">{text}</span>'
     return f'<div class="c-act" role="cell">{inner}</div>'

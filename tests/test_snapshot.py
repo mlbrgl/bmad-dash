@@ -59,7 +59,8 @@ def initiatives() -> list[Initiative]:
             tree=busy_tree(),
             top_tickets=[Ticket("7", "Top-level ticket", "planned",
                                 "initiative-busy/story-top-plan.md", ago(days=2), False)],
-            activity=Activity(ago(minutes=12), "Wrote the plan", "memlog"),
+            activity=Activity(ago(minutes=12), "Wrote the plan", "memlog",
+                              "initiative-busy/forge-idea/.memlog.md"),
             status="active",
         ),
         Initiative(
@@ -68,7 +69,7 @@ def initiatives() -> list[Initiative]:
             title="Stale one",
             worktrees=[Worktree(Path("/tmp/snapshot-root/wt-stale"), "feature-stale")],
             tickets=[],
-            activity=Activity(ago(days=30), "", "commit"),
+            activity=Activity(ago(days=30), "feat: a commit subject", "commit"),
         ),
         Initiative(
             slug="initiative-quiet",

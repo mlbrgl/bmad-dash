@@ -63,6 +63,7 @@ def test_memlog_newest_gives_its_time_and_last_bullet(initiative, tmp_path):
     activity = last_activity(initiative, [Worktree(repo, "main")])
     assert (activity.when, activity.text, activity.source) == (
         T_NEW, "(lock) last one", "memlog")
+    assert activity.path == "initiative-x/epic-a/forge-a/.memlog.md"
 
 
 def test_plan_newest_gives_its_time_and_file_name(initiative, tmp_path):
@@ -73,6 +74,7 @@ def test_plan_newest_gives_its_time_and_file_name(initiative, tmp_path):
     activity = last_activity(initiative, [Worktree(repo, "main")])
     assert (activity.when, activity.text, activity.source) == (
         T_NEW, "story-a-plan.md", "plan")
+    assert activity.path == "initiative-x/epic-a/story-a-plan.md"
 
 
 def test_commit_newest_gives_its_time_and_subject(initiative, tmp_path):
@@ -83,6 +85,7 @@ def test_commit_newest_gives_its_time_and_subject(initiative, tmp_path):
     activity = last_activity(initiative, [Worktree(repo, "main")])
     assert (activity.when, activity.text, activity.source) == (
         T_NEW, "feat: <b>new</b>", "commit")
+    assert activity.path is None
 
 
 def test_no_worktree_uses_memlogs_and_plans_only(initiative):
