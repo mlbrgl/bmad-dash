@@ -124,6 +124,18 @@ print("hi")
 ```
 """
 
+TICKETS_TOML = """# Epic A tickets
+
+[[entry]]
+id = 3
+title = "Escape <b>&</b>"
+
+[[entry]]
+id = 4
+title = "Second"
+"""
+
+
 REPORT_HTML = "<!doctype html><html><head><style>h1{color:red}</style></head><body><h1>Report</h1></body></html>\n"
 
 
@@ -134,6 +146,7 @@ def files_project(project: Path) -> Path:
     - initiative-x/spec-x/spec-x.md        markdown with frontmatter
     - initiative-x/forge-x/forge-report.html
     - initiative-x/with space.md           name needing %20
+    - initiative-x/epic-a/tickets.toml     two entries, one title with `<b>&`
     - initiative-x/config.toml, data.json, noext   types we don't serve
     - initiative-x/link-in.md  -> spec-x/spec-x.md (inside)
     - initiative-x/link-out.md -> <root>/secret.md (outside)
@@ -142,6 +155,8 @@ def files_project(project: Path) -> Path:
     out = project / "_bmad-output" / "initiative-x"
     (out / "spec-x").mkdir(parents=True)
     (out / "forge-x").mkdir()
+    (out / "epic-a").mkdir()
+    (out / "epic-a" / "tickets.toml").write_text(TICKETS_TOML)
     (out / "spec-x" / "spec-x.md").write_text(SPEC_MD)
     (out / "forge-x" / "forge-report.html").write_text(REPORT_HTML)
     (out / "with space.md").write_text("# Spaced\n")

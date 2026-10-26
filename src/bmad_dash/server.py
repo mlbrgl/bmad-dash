@@ -16,8 +16,10 @@ from bmad_dash import commands
 from bmad_dash.files import (
     NotFound,
     Refused,
+    TICKETS_TOML,
     not_found_page,
     render_markdown,
+    render_tickets_toml,
     resolve_file,
     split_project,
 )
@@ -370,7 +372,9 @@ def make_server(
                 # missing files: no hint about what exists beyond _bmad-output/.
                 self.send_html(not_found_page().encode("utf-8"), status=404)
                 return
-            if target.suffix == ".md":
+            if target.name == TICKETS_TOML:
+                body = render_tickets_toml(target).encode("utf-8")
+            elif target.suffix == ".md":
                 body = render_markdown(target).encode("utf-8")
             else:
                 body = target.read_bytes()

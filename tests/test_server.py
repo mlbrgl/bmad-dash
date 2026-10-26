@@ -226,9 +226,28 @@ def test_file_not_served_is_404_page(files_server, path):
     assert b"Initiatives</a>" not in body  # no back link
 
 
+def test_file_tickets_toml_is_shown_as_entry_blocks(files_server):
+    response, body = raw_get(files_server, "/file/project/initiative-x/epic-a/tickets.toml")
+    assert response.status == 200
+    assert response.getheader("Content-Type").startswith("text/html")
+    assert b'<pre class="entry" id="3">' in body
+    assert b"&lt;b&gt;&amp;&lt;/b&gt;" in body
+    assert b"pre.entry:target" in body
+
+
+def test_file_other_toml_names_stay_404(files_server, files_project):
+    out = files_project / "_bmad-output" / "initiative-x"
+    (out / "alias.toml").symlink_to(out / "epic-a" / "tickets.toml")
+    (out / "tickets.toml").symlink_to(out / "spec-x" / "spec-x.md")
+    for path in ["alias.toml", "tickets.toml", "config.toml"]:
+        response, _ = raw_get(files_server, f"/file/project/initiative-x/{path}")
+        assert response.status == 404, path
+
+
 @pytest.mark.parametrize("path", [
     "/file/project/initiative-x/spec-x/spec-x.md",
     "/file/project/initiative-x/forge-x/forge-report.html",
+    "/file/project/initiative-x/epic-a/tickets.toml",
     "/file/project/initiative-x/spec-x/spec-x.md?frame=1",
     "/file/project/initiative-x/forge-x/forge-report.html?frame=1",
 ])

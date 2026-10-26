@@ -67,6 +67,10 @@ class Ticket:
     ready: bool = False
     # The plan's reason for a `blocked` ticket; the unblock prompt quotes it.
     blocked_reason: str = ""
+    # No plan or leaf file: its entry, `<folder>/tickets.toml#<id>` relative to
+    # `_bmad-output/` (without the `#<id>`), and the entry's id. None when it
+    # has a file, or its entry has no `id`.
+    entry: tuple[str, str] | None = None
 
 
 @dataclass
@@ -498,6 +502,10 @@ def make_ticket(
     state = ticket_state(raw)
     open_ticket = state not in CLOSED_STATES
     ref = str(raw.get("ref") or "")
+    entry = None
+    if file is None and raw.get("id") is not None:
+        toml_path = (folder / "tickets.toml").relative_to(output_dir).as_posix()
+        entry = (toml_path, str(raw["id"]))
     return Ticket(
         ref=ref,
         title=str(raw.get("title", "")),
@@ -507,6 +515,7 @@ def make_ticket(
         stale=open_ticket and updated is not None and is_old(updated, now),
         ready=next_info is not None and ref in next_info.ready,
         blocked_reason=str(raw.get("blocked_reason") or ""),
+        entry=entry,
     )
 
 

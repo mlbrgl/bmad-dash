@@ -1,6 +1,12 @@
 import pytest
 
-from bmad_dash.files import NotFound, Refused, render_markdown, resolve_file
+from bmad_dash.files import (
+    NotFound,
+    Refused,
+    render_markdown,
+    render_tickets_toml,
+    resolve_file,
+)
 
 
 def test_markdown_resolves_and_renders(files_project):
@@ -145,3 +151,51 @@ def test_markdown_heading_without_ascii_words_gets_an_id(tmp_path):
     assert 'id=""' not in html
     assert '<h2 id="section">✅</h2>' in html
     assert '<h2 id="section-1">日本語</h2>' in html
+
+
+# --- tickets.toml ---
+
+
+def test_tickets_toml_renders_one_escaped_block_per_entry(files_project):
+    path = resolve_file(files_project, "initiative-x/epic-a/tickets.toml")
+    html = render_tickets_toml(path)
+    assert "<title>tickets.toml</title>" in html
+    # The preamble is its own block, without an id.
+    assert '<pre class="entry"># Epic A tickets\n\n</pre>' in html
+    assert '<pre class="entry" id="3">[[entry]]\nid = 3\n' in html
+    assert '<pre class="entry" id="4">[[entry]]\nid = 4\n' in html
+    assert "title = &quot;Escape &lt;b&gt;&amp;&lt;/b&gt;&quot;" in html
+    assert "<b>&</b>" not in html
+    assert "pre.entry:target" in html
+    assert "<script" not in html
+
+
+def test_tickets_toml_block_without_id_or_unparsable_has_no_id(tmp_path):
+    path = tmp_path / "tickets.toml"
+    path.write_text('[[entry]]\ntitle = "no id"\n\n[[entry]]\nid = = broken\n\n'
+                    '[[entry]]\nid = 5\n')
+    html = render_tickets_toml(path)
+    assert html.count('<pre class="entry">[[entry]]') == 2
+    assert '<pre class="entry" id="5">' in html
+
+
+def test_tickets_toml_without_preamble_starts_with_an_entry(tmp_path):
+    path = tmp_path / "tickets.toml"
+    path.write_text("[[entry]]\nid = 1\n")
+    html = render_tickets_toml(path)
+    assert html.count("<pre") == 1
+    assert '<pre class="entry" id="1">' in html
+
+
+def test_tickets_toml_symlink_to_markdown_is_not_found(files_project):
+    out = files_project / "_bmad-output" / "initiative-x"
+    (out / "tickets.toml").symlink_to(out / "spec-x" / "spec-x.md")
+    with pytest.raises(NotFound):
+        resolve_file(files_project, "initiative-x/tickets.toml")
+
+
+def test_toml_alias_of_tickets_toml_is_not_found(files_project):
+    out = files_project / "_bmad-output" / "initiative-x"
+    (out / "alias.toml").symlink_to(out / "epic-a" / "tickets.toml")
+    with pytest.raises(NotFound):
+        resolve_file(files_project, "initiative-x/alias.toml")

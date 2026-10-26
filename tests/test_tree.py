@@ -352,6 +352,19 @@ def test_ticket_without_any_file_has_no_updated(initiative):
     assert (t.path, t.updated, t.stale) == (None, None, False)
 
 
+def test_ticket_without_files_points_at_its_tickets_toml_entry(initiative):
+    epic = make_folder(initiative, "epic-x")
+    t = epic_ticket(epic, {**ticket("1.3", "planned"), "id": 3})
+    assert t.entry == ("initiative-x/epic-x/tickets.toml", "3")
+
+
+def test_ticket_with_a_file_or_no_id_has_no_entry(initiative):
+    epic = make_folder(initiative, "epic-x")
+    write_plan(epic, "story-y-plan.md", "'3'", NOW)
+    assert epic_ticket(epic, {**ticket("1.3", "planned"), "id": 3}).entry is None
+    assert epic_ticket(epic, {**ticket("1.4", "planned"), "id": None}).entry is None
+
+
 def test_ticket_with_null_ref_has_empty_ref(initiative):
     epic = make_folder(initiative, "epic-x")
     t = epic_ticket(epic, {**ticket("1.3", "planned"), "ref": None})
@@ -688,6 +701,12 @@ def test_initiative_level_ticket_falls_back_to_initiative_tickets_toml(initiativ
     assert top.path is None
     assert top.updated == when
     assert top.stale is True
+
+
+def test_initiative_level_ticket_without_files_points_at_initiative_tickets_toml(initiative):
+    raw = {**ticket("1", "backlog", "initiative-x"), "id": 1}
+    top = only(initiative_tickets(initiative, [raw], NOW))
+    assert top.entry == ("initiative-x/tickets.toml", "1")
 
 
 def test_no_initiative_level_tickets_when_tickets_unavailable(initiative):

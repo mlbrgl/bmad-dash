@@ -28,7 +28,8 @@ def busy_tree() -> list[TreeItem]:
     tickets = [
         Ticket("1.1", "First ticket", "done", "initiative-busy/epic-one/story-1-plan.md",
                ago(days=3), False),
-        Ticket("1.2", "Second <ticket>", "in progress", None, ago(days=20), True),
+        Ticket("1.2", "Second <ticket>", "in progress", None, ago(days=20), True,
+               entry=("initiative-busy/epic-one/tickets.toml", "2")),
     ]
     return [
         TreeItem("forge", "forge-idea", "initiative-busy/forge-idea/forge-idea.md",

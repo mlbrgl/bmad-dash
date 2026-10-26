@@ -66,9 +66,15 @@ def relative_time(when: datetime, now: datetime) -> str:
 # Its own grid: kind · name · status · updated. No indent: the docs band,
 # bold epic headers and the kind column carry the grouping.
 
-def file_link(project: str, path: str, text: str, css_class: str, title: str = "") -> str:
-    """The one place a file href is built: `/file/<project>/<path>`."""
-    href = escape("/file/" + quote(project) + "/" + quote(path))
+def file_link(
+    project: str, path: str, text: str, css_class: str, title: str = "", anchor: str = ""
+) -> str:
+    """The one place a file href is built: `/file/<project>/<path>`, plus
+    `#<anchor>` when given."""
+    url = "/file/" + quote(project) + "/" + quote(path)
+    if anchor:
+        url += "#" + quote(anchor)
+    href = escape(url)
     title_attr = f' title="{escape(title)}"' if title else ""
     return f'<a class="{css_class}" href="{href}"{title_attr}>{escape(text)}</a>'
 
@@ -140,6 +146,20 @@ def item_cell(item: TreeItem, epic: TreeItem | None, worktree: Worktree | None) 
     return f'<span role="cell">{SEP.join(links)}</span>'
 
 
+ENTRY_TOOLTIP = "No plan yet: opens its entry in tickets.toml"
+
+
+def ticket_name_cell(project: str, ticket: Ticket) -> str:
+    """The ticket's name, linked to its plan or leaf file; with neither, to
+    its entry in `tickets.toml` (CAP-14); with no entry id, plain text."""
+    if ticket.path is None and ticket.entry is not None:
+        toml_path, entry_id = ticket.entry
+        link = file_link(project, toml_path, ticket.title, "name-link",
+                         ENTRY_TOOLTIP, entry_id)
+        return f'<span role="cell" class="t-name">{link}</span>'
+    return name_cell(project, ticket.title, ticket.path)
+
+
 def ticket_row(
     project: str,
     ticket: Ticket,
@@ -149,7 +169,7 @@ def ticket_row(
 ) -> str:
     return tree_row(
         ticket.ref,
-        name_cell(project, ticket.title, ticket.path),
+        ticket_name_cell(project, ticket),
         ticket_cell(ticket, worktree),
         updated_cell(ticket.updated, show_stale and ticket.stale, now),
     )

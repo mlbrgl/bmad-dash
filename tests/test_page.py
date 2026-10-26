@@ -750,6 +750,24 @@ def test_top_tickets_come_after_epics():
     assert "Top &lt;t&gt;" in rows[-1]
 
 
+def test_plan_less_ticket_links_its_tickets_toml_entry():
+    initiative = tree_initiative()
+    initiative.top_tickets = [Ticket("9", "Top <t>", "planned", None, NOW, False,
+                                     entry=("initiative-a/tickets.toml", "9"))]
+    row = rows_of(render([initiative]))[-1]
+    assert ('<a class="name-link" href="/file/proj/initiative-a/tickets.toml#9"'
+            ' title="No plan yet: opens its entry in tickets.toml">Top &lt;t&gt;</a>') in row
+
+
+def test_ticket_with_a_plan_keeps_its_plan_link_even_with_an_entry():
+    initiative = tree_initiative()
+    initiative.top_tickets = [Ticket("9", "Top", "planned", "initiative-a/story-top-plan.md",
+                                     NOW, False, entry=("initiative-a/tickets.toml", "9"))]
+    row = rows_of(render([initiative]))[-1]
+    assert 'href="/file/proj/initiative-a/story-top-plan.md"' in row
+    assert "tickets.toml" not in row and "No plan yet" not in row
+
+
 def test_only_top_tickets_still_get_a_caret_and_panel():
     initiative = Initiative("initiative-a", "A", [], tickets=[{"state": "planned"}])
     initiative.top_tickets = [Ticket("1", "Top", "planned", None, NOW, False)]
