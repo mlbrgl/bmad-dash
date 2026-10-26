@@ -32,10 +32,15 @@ code { font-family: var(--mono); font-size: 12px; }
 .c-title, .c-proj, .c-act { display: flex; flex-direction: column; min-width: 0; }
 .ttl { display: flex; gap: 8px; align-items: baseline; font-weight: 600; font-size: 14.5px; }
 .caret { color: var(--ink-muted); font-size: 10px; width: 10px; flex: none; }
-/* A 24x24 hit area around the 10px caret, without moving the title. */
-.toggle { display: flex; align-items: center; justify-content: center; flex: none;
-          width: 24px; height: 24px; margin: -5px -7px; background: none; border: 0;
-          padding: 0; border-radius: 4px; cursor: pointer; }
+/* One button holds caret and title. Its padding widens the hit area around
+   the 10px caret without moving the title. */
+.toggle { display: flex; gap: 8px; align-items: baseline; min-width: 0;
+          margin: -5px -7px; padding: 5px 7px; background: none; border: 0;
+          border-radius: 4px; font: inherit; color: var(--ink); text-align: left;
+          cursor: pointer; }
+/* Any empty part of the row toggles too (page script); the panel doesn't. */
+.init:has(button.toggle) { cursor: pointer; }
+.panel { cursor: auto; }
 .toggle:hover .caret { color: var(--ink); }
 .toggle[aria-expanded="false"] .caret::before { content: "\25B6"; }
 .toggle[aria-expanded="true"] .caret::before { content: "\25BC"; }
@@ -116,7 +121,10 @@ svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor;
 .t-note { font-size: 12px; padding: 4px 0 6px; }
 .t-row { display: grid; grid-template-columns: var(--tcols); column-gap: 16px;
          align-items: baseline; padding: 6px 0; }
-.t-row:has(.name-link):hover { background: var(--tree-row-hover); }
+/* A row with a file opens it on a click on any empty part (page script). */
+.t-row.opens { cursor: pointer; }
+.t-row.opens:hover { background: var(--tree-row-hover); }
+.t-row.opens:hover .name-link { text-decoration: underline; }
 .t-head { font-size: 12px; color: var(--ink-muted); border-bottom: 1px solid var(--line);
           padding-bottom: 6px; margin-bottom: 2px; }
 .t-kind { font: 12px var(--mono); color: var(--ink-muted); min-width: 0; overflow: hidden;

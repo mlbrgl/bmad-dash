@@ -107,7 +107,7 @@ def tree_initiative(tickets: list[dict] | None = [], slug="initiative-a") -> Ini
 
 def rows_of(html: str) -> list[str]:
     """Each tree row's markup, header first."""
-    return re.findall(r'<div class="t-row[^"]*" role="row">(.*?)</div>', html)
+    return re.findall(r'<div class="t-row[^"]*" role="row"[^>]*>(.*?)</div>', html)
 
 
 def test_tree_is_a_table_with_header_row():
@@ -157,8 +157,8 @@ def test_tickets_sit_under_epic_without_a_single_spec():
 
 def test_epic_head_row_is_marked_t_epic():
     html = render([tree_initiative()])
-    assert html.count('class="t-row t-epic" role="row"') == 1
-    epic = html.split('class="t-row t-epic" role="row">')[1]
+    assert html.count('class="t-row t-epic opens" role="row"') == 1
+    epic = html.split('class="t-row t-epic opens" role="row"')[1].split(">", 1)[1]
     assert epic.startswith('<span role="cell" class="t-kind">epic</span>')
 
 
@@ -221,7 +221,8 @@ def test_tree_escapes_names_and_quotes_links():
     assert 'href="/file/proj/initiative-a/epic-a/epic-a.md"' in html
     assert ('<a class="name-link" href="/file/proj/initiative-a/epic-a/story-t-plan.md">'
             "&lt;i&gt;T&lt;/i&gt;</a>") in html
-    assert html.count('href="/file/') == 3  # forge and ticket 1.2 have no file
+    assert html.count(' href="/file/') == 3  # forge and ticket 1.2 have no file
+    assert html.count('data-href="/file/') == 3
 
 
 def test_plain_names_without_files():
@@ -335,20 +336,102 @@ def test_tab_order_caret_vscode_pr_resume_tree():
     assert order == sorted(order)
 
 
-def test_caret_alone_is_the_toggle():
+def test_toggle_button_holds_caret_and_title():
     html = render([tree_initiative()])
     title = cell(html, "c-title")
     assert re.search(
-        r'<button type="button" class="toggle"[^>]* aria-label="Show tree: A">'
-        r'<span class="caret" aria-hidden="true"></span></button>A</span>',
+        r'<span class="ttl"><button type="button" class="toggle" aria-expanded="false"'
+        r' aria-controls="panel-0" data-key="proj/initiative-a" aria-label="Show tree: A">'
+        r'<span class="caret" aria-hidden="true"></span>A</button></span>',
         title,
     )
 
 
-def test_no_row_wide_click_toggle():
+def test_title_without_panel_is_plain_text():
+    html = render([Initiative("initiative-a", "A", [], tickets=[])])
+    assert ('<span class="ttl"><span class="caret"></span>A</span>'
+            in cell(html, "c-title"))
+
+
+def test_script_toggles_on_row_click_and_opens_tree_rows():
     html = render([tree_initiative()])
-    assert "closest(\".init\")" not in html
-    assert ":has(.toggle)" not in html
+    script = html.split("<script>")[1]
+    assert 'button.closest(".init")' in script
+    assert 'e.target.closest(".panel")' in script
+    assert 'e.target.closest("a, button, form, .place")' in script
+    assert "window.getSelection()" in script
+    assert 'querySelectorAll(".t-row[data-href]")' in script
+    assert '"auxclick"' in script and "window.open(href)" in script
+    assert "onclick" not in markup(html)
+    assert ":has(button.toggle) { cursor: pointer; }" in html
+
+
+def name_href(row: str) -> str | None:
+    match = re.search(r'<a class="name-link" href="([^"]*)"', row)
+    return match and match.group(1)
+
+
+def data_href(row_html: str) -> str | None:
+    match = re.search(r'role="row" data-href="([^"]*)"', row_html)
+    return match and match.group(1)
+
+
+def full_rows(html: str) -> list[str]:
+    """Each tree row's markup, opening tag included."""
+    return re.findall(r'<div class="t-row[^"]*" role="row"[^>]*>.*?</div>', html)
+
+
+def test_tree_rows_with_a_file_carry_their_name_link_href():
+    initiative = tree_initiative()
+    plan_less = Ticket("1.3", "No plan", "backlog", None, None, False,
+                       entry=("initiative-a/epic-a/tickets.toml", "1.3"))
+    initiative.tree[1].tickets.append(plan_less)
+    rows = full_rows(grid(render([initiative])))[1:]
+    with_file = [r for r in rows if name_href(r)]
+    # epic, spec, ticket 1.1 (plan), ticket 1.3 (tickets.toml entry)
+    assert len(with_file) == 4
+    for row in with_file:
+        assert 'class="t-row' in row and " opens" in row.split(">")[0]
+        assert data_href(row) == name_href(row)
+    assert data_href(with_file[-1]) == "/file/proj/initiative-a/epic-a/tickets.toml#1.3"
+
+
+def test_plain_name_and_toggle_rows_have_no_href():
+    initiative = tree_initiative()
+    initiative.tree[1].tickets[0].word = "done"  # a Show 1 closed ticket row
+    rows = full_rows(grid(render([initiative])))[1:]
+    plain = [r for r in rows if "name-text" in r]
+    toggles = [r for r in rows if "closed-toggle" in r]
+    assert plain and toggles
+    for row in plain:
+        assert "data-href" not in row and " opens" not in row.split(">")[0]
+    for row in toggles:
+        assert row.startswith('<div class="t-row t-toggle" role="row">')
+
+
+def close_only(slug: str, hours_ago: float) -> Initiative:
+    """A tree whose one epic is done: its only doc action is `close`."""
+    epic = TreeItem("epic", "epic-done", "x/epic-done/epic-done.md", None, "finished",
+                    word="done")
+    initiative = Initiative(slug, slug.upper(), [], tickets=[], tree=[epic])
+    initiative.activity = Activity(NOW - timedelta(hours=hours_ago), "", "plan")
+    return initiative
+
+
+def test_close_only_row_is_marked():
+    html = grid(render([close_only("c", 1)]))
+    assert [a[0] for a in doc_actions(close_only("c", 1))] == ["close"]
+    assert '<div class="init" role="row" data-closed-start>' in html
+    assert "data-closed-start" not in grid(render([tree_initiative()]))
+
+
+def test_first_visit_skips_close_only_newest():
+    older = tree_initiative(slug="older")
+    older.activity = Activity(NOW - timedelta(days=2), "", "plan")
+    html = grid(render([close_only("newest", 1), older]))
+    assert html.count('class="toggle" aria-expanded="true"') == 1
+    assert 'aria-expanded="true" aria-controls="panel-1" data-key="proj/older"' in html
+    assert 'aria-expanded="false" aria-controls="panel-0" data-key="proj/newest"' in html
 
 
 def test_only_newest_activity_row_starts_open():
@@ -790,8 +873,8 @@ def test_script_drops_vscode_failed_from_url():
     assert 'params.has("vscode_failed")' in html
 
 
-def test_script_keeps_finished_rows_closed_on_restore():
-    assert 'closest(".is-finished")' in render([])
+def test_script_keeps_finished_and_close_only_rows_closed_on_restore():
+    assert 'closest(".is-finished, [data-closed-start]")' in render([])
 
 
 def test_finished_row_never_starts_open():

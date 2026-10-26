@@ -58,7 +58,8 @@ existing files inside that initiative's worktree open; otherwise the page
 shows "Couldn't open in VS Code".
 
 Each initiative shows at most one worktree: the first one `git worktree list`
-gives whose config names it. Click the caret to show a row's tree.
+gives whose config names it. Click the title or any empty part of a row
+to show its tree; click an empty part of a tree row to open its file.
 
 - **Worktree cell**: click it to run `code -n <worktree>`, so the `code` CLI
   must be on `PATH`. It only accepts a POST from the dashboard itself, and

@@ -66,15 +66,20 @@ def relative_time(when: datetime, now: datetime) -> str:
 # Its own grid: kind · name · status · updated. No indent: the docs band,
 # bold epic headers and the kind column carry the grouping.
 
-def file_link(
-    project: str, path: str, text: str, css_class: str, title: str = "", anchor: str = ""
-) -> str:
-    """The one place a file href is built: `/file/<project>/<path>`, plus
-    `#<anchor>` when given."""
+def file_href(project: str, path: str, anchor: str = "") -> str:
+    """The one place a file URL is built: `/file/<project>/<path>`, plus
+    `#<anchor>` when given. Not escaped."""
     url = "/file/" + quote(project) + "/" + quote(path)
     if anchor:
         url += "#" + quote(anchor)
-    href = escape(url)
+    return url
+
+
+def file_link(
+    project: str, path: str, text: str, css_class: str, title: str = "", anchor: str = ""
+) -> str:
+    """A link to a file (see `file_href`)."""
+    href = escape(file_href(project, path, anchor))
     title_attr = f' title="{escape(title)}"' if title else ""
     return f'<a class="{css_class}" href="{href}"{title_attr}>{escape(text)}</a>'
 
@@ -114,11 +119,17 @@ def updated_cell(updated: datetime | None, stale: bool, now: datetime) -> str:
     )
 
 
-def tree_row(kind: str, name: str, word: str, updated: str, css_class: str = "") -> str:
-    row_class = f"t-row {css_class}" if css_class else "t-row"
+def tree_row(
+    kind: str, name: str, word: str, updated: str, css_class: str = "", href: str = ""
+) -> str:
+    """One tree row. With `href` (the name link's URL, unescaped), the row is
+    marked `opens` and carries it in `data-href`: the page script opens it on
+    a click on an empty part of the row."""
+    classes = ["t-row"] + ([css_class] if css_class else []) + (["opens"] if href else [])
+    href_attr = f' data-href="{escape(href)}"' if href else ""
     return (
-        f'<div class="{row_class}" role="row"><span role="cell" class="t-kind">'
-        f"{escape(kind)}</span>{name}{word}{updated}</div>"
+        f'<div class="{" ".join(classes)}" role="row"{href_attr}><span role="cell"'
+        f' class="t-kind">{escape(kind)}</span>{name}{word}{updated}</div>'
     )
 
 
@@ -160,6 +171,17 @@ def ticket_name_cell(project: str, ticket: Ticket) -> str:
     return name_cell(project, ticket.title, ticket.path)
 
 
+def ticket_href(project: str, ticket: Ticket) -> str:
+    """The URL the ticket's name links to (as `ticket_name_cell`), or "" when
+    its name is plain text."""
+    if ticket.path is not None:
+        return file_href(project, ticket.path)
+    if ticket.entry is not None:
+        toml_path, entry_id = ticket.entry
+        return file_href(project, toml_path, entry_id)
+    return ""
+
+
 def ticket_row(
     project: str,
     ticket: Ticket,
@@ -172,6 +194,7 @@ def ticket_row(
         ticket_name_cell(project, ticket),
         ticket_cell(ticket, worktree),
         updated_cell(ticket.updated, show_stale and ticket.stale, now),
+        href=ticket_href(project, ticket),
     )
 
 
@@ -207,8 +230,9 @@ def hidden_group(group_id: str, group: str, show: str, hide: str,
         f' aria-controls="{escape(group_id)}" data-show="{escape(show)}"'
         f' data-hide="{escape(hide)}">{escape(show)}</button>'
     )
+    # Marked `t-toggle`: a click on its empty part opens nothing.
     button_row = (
-        f'<div class="t-row" role="row"><span role="cell"></span>'
+        f'<div class="t-row t-toggle" role="row"><span role="cell"></span>'
         f'<span role="cell" class="t-name">{button}</span>'
         f'<span role="cell"></span><span role="cell"></span></div>'
     )
@@ -266,6 +290,7 @@ def item_rows(
         item_cell(item, epic, worktree),
         updated_cell(item.updated, show_stale and item.state == STALE, now),
         "t-epic" if item.kind == "epic" else "",
+        file_href(project, item.path) if item.path is not None else "",
     )
     group_id = f"{closed_prefix}-{item.name}"
     rows = []
@@ -326,20 +351,20 @@ def panel_content(initiative: Initiative, now: datetime) -> str:
 # --- row cells ---
 
 def initiative_cell(initiative: Initiative, panel_id: str, is_open: bool) -> str:
-    """Title with slug below. When there is a tree to show, a caret button
-    before the title toggles it; the title itself is plain text."""
+    """Title with slug below. When there is a tree to show, one toggle button
+    holds the caret and the title; else an empty caret slot, then the title
+    as plain text."""
     title = escape(initiative.title)
     if has_panel(initiative):
         expanded = "true" if is_open else "false"
-        caret = (
-            f'<button type="button" class="toggle" aria-expanded="{expanded}"'
+        heading = (
+            f'<span class="ttl"><button type="button" class="toggle" aria-expanded="{expanded}"'
             f' aria-controls="{panel_id}" data-key="{escape(initiative.key)}"'
             f' aria-label="Show tree: {title}">'
-            f'<span class="caret" aria-hidden="true"></span></button>'
+            f'<span class="caret" aria-hidden="true"></span>{title}</button></span>'
         )
     else:
-        caret = '<span class="caret"></span>'
-    heading = f'<span class="ttl">{caret}{title}</span>'
+        heading = f'<span class="ttl"><span class="caret"></span>{title}</span>'
     return (
         f'<div class="c-title" role="cell">{heading}'
         f'<span class="slug">{escape(initiative.slug)}</span></div>'
@@ -523,7 +548,7 @@ def initiative_row(
     prs: Mapping[str, PullRequest] = NO_PRS,
 ) -> str:
     """One grid row. DOM order: the four cells, then the panel, so Tab runs
-    caret -> VS Code -> PR -> resume -> doc chips -> tree links. CSS puts the
+    title toggle -> VS Code -> PR -> resume -> doc chips -> tree links. CSS puts the
     panel on grid row 2."""
     panel_id = f"panel-{index}"
     is_open = is_open and has_panel(initiative)
@@ -536,7 +561,9 @@ def initiative_row(
     if has_panel(initiative):
         cells.append(panel_cell(initiative, panel_id, is_open, now))
     css_class = "init is-finished" if initiative.finished else "init"
-    return f'<div class="{css_class}" role="row">{"".join(cells)}</div>'
+    # The page script keeps a close-only row closed, even when saved open.
+    closed_start = " data-closed-start" if only_close(initiative) else ""
+    return f'<div class="{css_class}" role="row"{closed_start}>{"".join(cells)}</div>'
 
 
 COLUMN_HEADS = ["Initiative", "Project", "Last activity", "Actions"]
@@ -551,12 +578,19 @@ def header_row() -> str:
     return f'<div class="col-head" role="row">{"".join(cells)}</div>'
 
 
+def only_close(initiative: Initiative) -> bool:
+    """The initiative's only doc action is `close`: its row always starts
+    closed."""
+    actions = doc_actions(initiative)
+    return len(actions) == 1 and actions[0][0] == "close"
+
+
 def newest_index(initiatives: list[Initiative]) -> int | None:
     """Index of the initiative with a tree and the newest activity (first on
-    ties), or None."""
+    ties), or None. Close-only initiatives are skipped."""
     best = None
     for index, initiative in enumerate(initiatives):
-        if initiative.activity is None or not has_panel(initiative):
+        if initiative.activity is None or not has_panel(initiative) or only_close(initiative):
             continue
         if best is None or initiative.activity.when > initiatives[best].activity.when:
             best = index

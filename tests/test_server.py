@@ -375,7 +375,7 @@ def test_body_cut_short_by_client_is_400(project, serve):
 
 
 def walkthrough_row(html: str) -> str:
-    return next(r for r in html.split('<div class="t-row"') if "walkthrough-x" in r)
+    return next(r for r in html.split('<div class="t-row') if "walkthrough-x" in r)
 
 
 def fake_gt(monkeypatch, calls, gt):
