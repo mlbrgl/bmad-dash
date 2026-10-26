@@ -60,8 +60,21 @@ def get_page(server) -> str:
 
 
 def rows(html: str) -> list[str]:
-    """The `<project> · <slug>` of each row, in page order."""
-    return re.findall(r'<span class="slug">([^<]+)</span>', html)
+    """The `<project> · <slug>` of each row, in page order: the slug from the
+    Initiative cell, the project from the Project cell after it."""
+    pairs = re.findall(r'<span class="slug">([^<]+)</span></div>'
+                       r'<div class="c-proj" role="cell"><span class="proj">([^<]+)</span>', html)
+    return [f"{project} · {slug}" for slug, project in pairs]
+
+
+def row_of(html: str, name: str) -> str:
+    """The markup of the one row whose `rows()` entry is `name`."""
+    project, slug = name.split(" · ")
+    found = [row for row in html.split('role="row">')
+             if f'<span class="slug">{slug}</span>' in row
+             and f'<span class="proj">{project}</span>' in row]
+    assert len(found) == 1, name
+    return found[0]
 
 
 # --- page ---
@@ -112,9 +125,8 @@ def test_pr_is_looked_up_by_project_and_slug():
     b = Initiative("initiative-x", "B", wt, project="b")
     pr = PullRequest(7, "b", "main", "open", "https://github.com/o/r/pull/7")
     html = render_page([a, b], [Path("/x/a"), Path("/x/b")], now=NOW, prs={"b/initiative-x": pr})
-    assert html.count(">#7<") == 1
-    b_row = html.split("b · initiative-x")[1]
-    assert ">#7<" in b_row
+    assert html.count('class="place pr"') == 1
+    assert 'class="place pr"' in row_of(html, "b · initiative-x")
 
 
 # --- server ---
@@ -206,8 +218,8 @@ def test_github_failure_in_one_root_keeps_the_others_buttons(project, other, ser
     monkeypatch.setattr(server_module, "load_topology", topology)
     html = get_page(serve([project, other]))
     assert html.count("Couldn't reach GitHub") == 1
-    assert html.count('class="btn btn-2 pr"') == 1
-    a_row = html.split("project · initiative-matched")[1].split('role="row"')[0]
+    assert html.count('class="place pr"') == 1
+    a_row = row_of(html, "project · initiative-matched")
     assert 'href="https://github.com/o/r/pull/7"' in a_row
 
 
@@ -299,5 +311,5 @@ def test_vscode_failed_names_one_project_when_slugs_match():
         vscode_failed="other/initiative-x",
     )
     assert html.count("Couldn't open VS Code") == 1
-    other_row = html.split("other · initiative-x")[1].split('role="row"')[0]
+    other_row = row_of(html, "other · initiative-x")
     assert "Couldn't open VS Code" in other_row

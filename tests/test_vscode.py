@@ -234,7 +234,8 @@ def test_flag_shows_message_on_that_row_only(vscode):
     assert body.count("Couldn't open VS Code") == 1
     # The message sits in the initiative-matched row, before the next row starts.
     rows = body.split('role="row">')
-    matched = [r for r in rows if '<span class="slug">project · initiative-matched</span>' in r]
+    matched = [r for r in rows if '<span class="slug">initiative-matched</span>' in r
+               and '<span class="proj">project</span>' in r]
     assert len(matched) == 1
     assert "Couldn't open VS Code" in matched[0]
     assert launched == []

@@ -43,7 +43,7 @@ def test_no_github_remote_shows_no_github_line(server):
     with urllib.request.urlopen(url) as response:
         html = response.read().decode()
     assert "Couldn't reach GitHub" not in html
-    assert 'class="btn btn-2 pr"' not in html
+    assert 'class="place pr"' not in html
 
 
 REMOTE = "origin\tgit@github.com:o/r.git (fetch)\n"
@@ -120,7 +120,7 @@ def test_gh_failure_in_gt_path_shows_header_and_no_buttons(project, monkeypatch,
     fake_github(monkeypatch, [], lambda args: (1, ""))
     html = get_page(serve(project))
     assert "Couldn't reach GitHub" in html
-    assert 'class="btn btn-2 pr"' not in html
+    assert 'class="place pr"' not in html
     assert "Matched one" in html
 
 
@@ -387,7 +387,7 @@ def test_stack_newest_commit_reaches_last_activity_and_walkthrough(
     assert "c work" in html and "feature-a work" not in html
     assert "stale-tag" in walkthrough_row(html)
     assert calls == [["gt", "state"]]  # once per request
-    assert 'class="btn btn-2 pr"' not in html and "Couldn't reach GitHub" not in html
+    assert 'class="place pr"' not in html and "Couldn't reach GitHub" not in html
 
 
 def test_gt_state_runs_once_with_github(stacked_project, monkeypatch, serve):

@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
-from bmad_dash.page import relative_time, render_page as render_page_for
+from bmad_dash.page import PR_ICONS, relative_time, render_page as render_page_for
 from bmad_dash.prs import PullRequest
 from bmad_dash.rules import (
     action_css,
@@ -58,7 +58,7 @@ def test_four_column_heads():
     html = render([Initiative("initiative-a", "A", [])])
     heads = re.findall(r'<div role="columnheader">(.*?)</div>', html)
     texts = [re.sub(r"<[^>]+>", "", h) for h in heads]
-    assert texts == ["Initiative", "Worktree", "Last activity", "Actions"]
+    assert texts == ["Initiative", "Project", "Last activity", "Actions"]
 
 
 def test_every_value_is_escaped():
@@ -74,10 +74,12 @@ def test_home_paths_shown_with_tilde():
     assert '<span class="path">~/Code/repo</span>' in html
 
 
-def test_worktree_title_is_full_path_even_under_home():
-    path = Path.home() / "Code" / "repo"
+def test_vscode_button_names_worktree_and_branch():
+    path = Path.home() / "Code" / "repo-feature"
     html = render([Initiative("initiative-a", "A", [Worktree(path, "master")])])
-    assert f'<button type="submit" class="wt" title="{path}">' in html
+    label = "Open worktree repo-feature (branch master) in VS Code"
+    assert (f'<button type="submit" class="place" title="{label}"'
+            f' aria-label="{label}"><svg class="i"') in html
 
 
 def test_dark_tokens_present():
@@ -283,18 +285,19 @@ def test_panel_comes_last_in_dom():
     html = render([tree_initiative()])
     row = html.split('<div class="init" role="row">')[1]
     order = [row.index(f'class="{c}"') for c in
-             ("c-title", "c-wt", "c-act", "c-btns", "panel")]
+             ("c-title", "c-proj", "c-act", "c-btns", "panel")]
     assert order == sorted(order)
 
 
-def test_tab_order_caret_worktree_resume_pr_tree():
+def test_tab_order_caret_vscode_pr_resume_tree():
     initiative = tree_initiative()
     initiative.worktrees = [Worktree(Path("/x/wt"), "b")]
     initiative.tree[0].path = "a/epic.md"
     html = render_page([initiative], [Path("/root")], now=NOW, prs={"proj/initiative-a": pr(7, "b")})
     row = html.split('<div class="init" role="row">')[1]
     order = [row.index(marker) for marker in
-             ('class="toggle"', 'class="wt"', ">resume<", ">#7<", 'class="name-link"')]
+             ('class="toggle"', 'button type="submit" class="place"', 'class="place pr"',
+              ">resume<", 'class="name-link"')]
     assert order == sorted(order)
 
 
@@ -350,19 +353,57 @@ def test_storage_key_is_one_key_for_all_projects():
     assert 'data-storage-key="bmad-dash:open"' in html
 
 
-# --- worktree cell ---
+# --- project cell ---
 
-def test_no_worktree_shows_muted_text():
+EMPTY_SLOT = '<span class="place" aria-hidden="true"></span>'
+
+
+def slots(html: str) -> list[str]:
+    """The place slots of the first Project cell, in order."""
+    places = cell(html, "c-proj").split('<span class="places">')[1]
+    return re.findall(r'<form class="vscode".*?</form>|<span class="place"[^>]*></span>'
+                      r'|<a class="place pr".*?</a>', places)
+
+
+def test_no_worktree_shows_name_and_muted_text_and_no_slots():
     html = render([Initiative("initiative-a", "A", [])])
-    assert cell(html, "c-wt") == '<span class="muted">no worktree</span>'
+    assert cell(html, "c-proj") == (
+        f'<span class="proj">{PROJECT}</span>'
+        '<span class="muted no-wt">no worktree</span>'
+    )
+    assert 'class="place' not in row_html(html)
 
 
-def test_worktree_name_with_branch_and_path_in_title():
-    worktree = Worktree(Path("/x/repo-feature"), "feature-branch")
-    html = render([Initiative("initiative-a", "A", [worktree])])
-    assert '<button type="submit" class="wt" title="/x/repo-feature">' in html
-    assert '<span class="wt-name">repo-feature</span>' in html
-    assert '<span class="wt-branch">feature-branch</span>' in html
+def test_worktree_and_pr_fill_four_slots_in_order():
+    html = with_pr(pr(7, "b"))
+    assert cell(html, "c-proj").startswith(f'<span class="proj">{PROJECT}</span><span class="places">')
+    found = slots(html)
+    assert len(found) == 4
+    assert found[0].startswith('<form class="vscode"')
+    assert found[1] == found[2] == EMPTY_SLOT
+    assert found[3].startswith('<a class="place pr"')
+
+
+def test_worktree_without_pr_has_vscode_then_three_empty_slots():
+    found = slots(with_prs({}))
+    assert len(found) == 4
+    assert found[0].startswith('<form class="vscode"')
+    assert found[1:] == [EMPTY_SLOT] * 3
+
+
+def test_main_checkout_title():
+    initiative = Initiative("initiative-a", "A", [Worktree(Path("/x/proj"), "main")])
+    html = render([initiative])
+    label = "Open main checkout (branch main) in VS Code"
+    assert f'title="{label}" aria-label="{label}"' in html
+
+
+def test_vscode_label_is_escaped():
+    initiative = Initiative("initiative-a", "A", [Worktree(Path('/x/w<"'), 'b<"')])
+    proj = cell(render([initiative]), "c-proj")
+    label = "Open worktree w&lt;&quot; (branch b&lt;&quot;) in VS Code"
+    assert f'title="{label}" aria-label="{label}"' in proj
+    assert '<"' not in proj
 
 
 # --- last activity ---
@@ -433,7 +474,7 @@ def plain(**kwargs) -> Initiative:
 def test_row_has_four_cells_then_the_panel():
     html = render([tree_initiative()])
     row = html.split('<div class="init" role="row">')[1]
-    order = [row.index(f'class="{c}"') for c in ("c-title", "c-wt", "c-act", "c-btns", "panel")]
+    order = [row.index(f'class="{c}"') for c in ("c-title", "c-proj", "c-act", "c-btns", "panel")]
     assert order == sorted(order)
     assert row_html(html).count('role="cell"') == 4
     assert "c-status" not in html
@@ -465,8 +506,9 @@ def test_finished_row_shows_no_doc_actions():
 
 def test_plain_row_has_resume_on_top_and_close_under_it():
     row = row_html(render([plain()]))
-    top_end = row.index("</div>", row.index('class="act-top"'))
-    assert row.index('class="act-top"') < row.index(">resume<") < top_end < row.index(">close<")
+    actions = cell(row, "c-btns")
+    assert actions.startswith('<a class="btn btn-1 chip"')
+    assert actions.index(">resume<") < actions.index(">close<")
 
 
 def test_any_open_work_hides_close():
@@ -534,7 +576,7 @@ def test_open_spec_and_forge_chips_stack_under_resume():
     initiative = Initiative("initiative-a", "A", [Worktree(WT, "main")],
                             tickets=[], tree=[forge, spec])
     row = row_html(render([initiative]))
-    assert row.index('class="act-top"') < row.index(">resume<")
+    assert cell(row, "c-btns").startswith('<a class="btn btn-1 chip"')
     assert row.index(">resume<") < row.index(">resume forge<") < row.index(">slice spec<")
     assert ">close<" not in row
     assert 'class="st-link chip"' in row
@@ -561,8 +603,8 @@ def test_close_chip_names_the_initiative_and_its_label():
 
 
 def test_doc_chips_have_the_session_icon():
-    row = row_html(render([plain()]))
-    assert row.count('<svg class="i" aria-hidden="true"') == 2  # resume and close
+    actions = cell(row_html(render([plain()])), "c-btns")
+    assert actions.count('<svg class="i" aria-hidden="true"') == 2  # resume and close
 
 
 def test_no_worktree_shows_no_doc_actions_and_no_status_words():
@@ -587,7 +629,7 @@ def markup(html: str) -> str:
 
 
 def slugs_in(html: str) -> list[str]:
-    return re.findall(rf'<span class="slug">{PROJECT} · (.*?)</span>', html)
+    return re.findall(r'<span class="slug">(.*?)</span>', html)
 
 
 def test_rows_sort_newest_activity_first_without_activity_last():
@@ -698,13 +740,14 @@ def test_resume_link_opens_claude_in_worktree_with_prompt():
     assert ">resume<" in actions
 
 
-def test_worktree_cell_posts_id_and_slug():
+def test_vscode_form_posts_project_id_and_slug():
     html = render([Initiative("initiative-a", "A", [Worktree(WT, "main")])])
-    worktree = cell(html, "c-wt")
-    assert worktree.startswith('<form class="vscode" method="post" action="/vscode">')
-    assert f'name="id" value="{worktree_id(WT)}"' in worktree
-    assert 'name="slug" value="initiative-a"' in worktree
-    assert '<span class="wt-name">my wt</span><span class="wt-branch">main</span></button>' in worktree
+    form = slots(html)[0]
+    assert form.startswith('<form class="vscode" method="post" action="/vscode">')
+    assert f'<input type="hidden" name="project" value="{PROJECT}">' in form
+    assert f'name="id" value="{worktree_id(WT)}"' in form
+    assert 'name="slug" value="initiative-a"' in form
+    assert form.endswith("</svg></button></form>")
 
 
 def test_no_separate_vscode_button():
@@ -716,7 +759,7 @@ def test_no_separate_vscode_button():
 def test_no_actions_without_worktree():
     html = render([Initiative("initiative-a", "A", [])])
     assert cell(html, "c-btns") == ""
-    assert "no worktree" in cell(html, "c-wt")
+    assert "no worktree" in cell(html, "c-proj")
 
 
 def test_slug_in_actions_and_form_is_escaped():
@@ -724,7 +767,7 @@ def test_slug_in_actions_and_form_is_escaped():
     actions = cell(html, "c-btns")
     assert "<b>" not in actions
     assert "i-%3Cb%3E%22" in actions
-    assert 'value="i-&lt;b&gt;&quot;"' in cell(html, "c-wt")
+    assert 'value="i-&lt;b&gt;&quot;"' in cell(html, "c-proj")
 
 
 def test_failure_message_on_flagged_row_only():
@@ -734,18 +777,19 @@ def test_failure_message_on_flagged_row_only():
     ]
     html = render_page(initiatives, [Path("/root")], now=NOW, vscode_failed="proj/initiative-b")
     assert html.count("Couldn't open VS Code") == 1
-    worktrees = re.findall(r'<div class="c-wt" role="cell">(.*?)</div>', html)
-    assert "Couldn't open VS Code" not in worktrees[0]
-    # Under the branch, in the Worktree cell.
-    assert worktrees[1].endswith('</form><span class="err">Couldn\'t open VS Code</span>')
+    projects = re.findall(r'<div class="c-proj" role="cell">(.*?)</div>', html)
+    assert "Couldn't open VS Code" not in projects[0]
+    # Under the slots, in the Project cell.
+    assert projects[1].endswith('</span></span><span class="err">Couldn\'t open VS Code</span>')
 
 
 def test_failure_message_shows_even_without_worktree():
     # The worktree vanished between render and click.
     initiatives = [Initiative("initiative-a", "A", [])]
     html = render_page(initiatives, [Path("/root")], now=NOW, vscode_failed="proj/initiative-a")
-    assert cell(html, "c-wt") == (
-        '<span class="muted">no worktree</span>'
+    assert cell(html, "c-proj") == (
+        f'<span class="proj">{PROJECT}</span>'
+        '<span class="muted no-wt">no worktree</span>'
         '<span class="err">Couldn\'t open VS Code</span>'
     )
     assert cell(html, "c-btns") == ""
@@ -789,41 +833,59 @@ def with_pr(pr_, **kwargs):
     return with_prs({"proj/initiative-a": pr_}, **kwargs)
 
 
-def test_pr_button_opens_lone_pr_in_new_tab():
+def pr_slot(html: str) -> str:
+    return slots(html)[3]
+
+
+def test_pr_slot_opens_lone_pr_in_new_tab_with_icon_only():
+    html = with_pr(pr(7, "b"))
+    link = pr_slot(html)
+    assert link == (
+        '<a class="place pr" href="https://github.com/o/r/pull/7" target="_blank" rel="noopener"'
+        ' title="Open PR #7, top of the stack, on GitHub"'
+        ' aria-label="open pull request #7 (opens in new tab)">'
+        '<svg class="i pr-open" aria-hidden="true" viewBox="0 0 16 16">'
+        f'<path d="{PR_ICONS["open"]}"/></svg></a>'
+    )
+    assert "#7<" not in html
+
+
+def test_no_pr_in_the_actions_cell():
     actions = cell(with_pr(pr(7, "b")), "c-btns")
-    assert ('<a class="btn btn-2 pr" href="https://github.com/o/r/pull/7"'
-            ' target="_blank" rel="noopener">') in actions
-    assert '<svg class="pr-icon pr-open" aria-hidden="true"' in actions
-    assert '<span class="sr-only">open pull request </span>#7' in actions
-    assert '<span class="sr-only"> (opens in new tab)</span>' in actions
-    assert actions.index(">resume<") < actions.index(">#7<")
+    assert "github.com" not in actions and "pull request" not in actions
 
 
-def test_pr_button_shows_the_mapped_pr():
+def test_pr_slot_shows_the_mapped_pr():
     # Which PR is the stack's top is stack.stack_prs's job; the page shows it.
-    actions = cell(with_pr(pr(9, "d", base="c")), "c-btns")
-    assert ">#9<" in actions
+    assert 'href="https://github.com/o/r/pull/9"' in pr_slot(with_pr(pr(9, "d", base="c")))
 
 
 def test_merged_closed_and_draft_tops_are_muted():
     for state in ("merged", "closed", "draft"):
-        actions = cell(with_pr(pr(7, "b", state=state)), "c-btns")
-        assert '<svg class="pr-icon pr-muted"' in actions
-        assert f'<span class="sr-only">{state} pull request </span>#7' in actions
+        link = pr_slot(with_pr(pr(7, "b", state=state)))
+        assert '<svg class="i pr-muted"' in link
+        assert f'title="{state.capitalize()} PR #7, top of the stack, on GitHub"' in link
+        assert f'aria-label="{state} pull request #7 (opens in new tab)"' in link
+
+
+def test_unknown_state_shows_the_open_icon():
+    link = pr_slot(with_pr(pr(7, "b", state="weird")))
+    assert '<svg class="i pr-open"' in link
+    assert 'aria-label="open pull request #7 (opens in new tab)"' in link
 
 
 def test_each_state_has_its_own_icon():
     paths = set()
     for state in ("open", "draft", "merged", "closed"):
-        actions = cell(with_pr(pr(7, "b", state=state)), "c-btns")
-        paths.add(re.search(r'<path fill="currentColor" d="([^"]+)"', actions).group(1))
+        link = pr_slot(with_pr(pr(7, "b", state=state)))
+        paths.add(re.search(r'<path d="([^"]+)"', link).group(1))
     assert len(paths) == 4
 
 
-def test_no_pr_button_without_a_mapped_pr_or_worktree():
-    assert 'class="btn btn-2 pr"' not in with_prs({})
-    assert 'class="btn btn-2 pr"' not in with_prs({"other-slug": pr(7, "b")})
-    assert 'class="btn btn-2 pr"' not in with_pr(pr(7, "b"), worktrees=[])
+def test_no_pr_slot_without_a_mapped_pr_or_worktree():
+    assert 'class="place pr"' not in with_prs({})
+    assert 'class="place pr"' not in with_prs({"other-slug": pr(7, "b")})
+    assert 'class="place pr"' not in with_pr(pr(7, "b"), worktrees=[])
 
 
 def test_pr_url_is_escaped():
@@ -837,7 +899,7 @@ def test_github_failure_shows_header_line_and_no_pr_buttons():
     html = with_prs(None)
     header = html.split('<header class="hdr">')[1].split("</header>")[0]
     assert header.endswith('<span class="err">Couldn\'t reach GitHub</span>')
-    assert 'class="btn btn-2 pr"' not in html
+    assert 'class="place pr"' not in html
     assert ">resume<" in html  # rest of the page unchanged
 
 
@@ -1183,10 +1245,11 @@ def test_finished_epics_allow_initiative_close():
     assert [a[0] for a in doc_actions(initiative)] == ["close"]
 
 
-def test_slug_line_names_the_project():
+def test_slug_line_is_the_slug_alone_and_the_project_has_its_cell():
     initiative = Initiative("foo", "Foo", [], project="owid-grapher")
     html = render_page_for([initiative], [Path("/x/owid-grapher")], now=NOW)
-    assert '<span class="slug">owid-grapher · foo</span>' in html
+    assert '<span class="slug">foo</span>' in html
+    assert cell(html, "c-proj").startswith('<span class="proj">owid-grapher</span>')
 
 
 def test_closed_group_ids_differ_between_projects():

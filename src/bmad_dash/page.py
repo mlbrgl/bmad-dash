@@ -1,7 +1,7 @@
 """Build the dashboard HTML.
 
 The page is a server-rendered ARIA grid. Each initiative is one row of four
-cells (Initiative, Worktree, Last activity, Actions), with its tree as a
+cells (Initiative, Project, Last activity, Actions), with its tree as a
 full-width panel under it. The only script opens and closes panels, reveals
 closed tickets, and remembers which panels are open.
 
@@ -277,7 +277,7 @@ def initiative_cell(initiative: Initiative, panel_id: str, is_open: bool) -> str
     heading = f'<span class="ttl">{caret}{title}</span>'
     return (
         f'<div class="c-title" role="cell">{heading}'
-        f'<span class="slug">{escape(initiative.project)} · {escape(initiative.slug)}</span></div>'
+        f'<span class="slug">{escape(initiative.slug)}</span></div>'
     )
 
 
@@ -294,33 +294,54 @@ def panel_cell(
 VSCODE_FAILED = "Couldn't open VS Code"
 
 
+def vscode_label(worktree: Worktree, project: str) -> str:
+    """Tooltip and accessible name of the VS Code button. A worktree folder
+    named like its project reads as the main checkout."""
+    if worktree.path.name == project:
+        return f"Open main checkout (branch {worktree.branch}) in VS Code"
+    return f"Open worktree {worktree.path.name} (branch {worktree.branch}) in VS Code"
+
+
 def vscode_form(worktree: Worktree, project: str, slug: str) -> str:
-    """The whole worktree block is the submit button that opens it in VS Code.
-    POSTs the project, the worktree id (what to open) and the slug (with the
-    project, where to show a failure)."""
+    """The VS Code place icon: a submit button in a form. POSTs the project,
+    the worktree id (what to open) and the slug (with the project, where to
+    show a failure)."""
+    label = escape(vscode_label(worktree, project))
     return (
         f'<form class="vscode" method="post" action="/vscode">'
         f'<input type="hidden" name="project" value="{escape(project)}">'
         f'<input type="hidden" name="id" value="{worktree_id(worktree.path)}">'
         f'<input type="hidden" name="slug" value="{escape(slug)}">'
-        f'<button type="submit" class="wt" title="{escape(str(worktree.path))}">'
-        f'<span class="sr-only">Open in VS Code: </span>'
-        f'<span class="wt-name">{escape(worktree.path.name)}</span>'
-        f'<span class="wt-branch">{escape(worktree.branch)}</span></button>'
-        f"</form>"
+        f'<button type="submit" class="place" title="{label}" aria-label="{label}">'
+        f"{VSCODE_ICON}</button></form>"
     )
 
 
-def worktree_cell(initiative: Initiative, vscode_failed: str = "") -> str:
-    """The worktree (a VS Code button) or `no worktree`. The failure message
-    shows even when the worktree has gone since."""
+# A slot with nothing in it: keeps the four tracks, announces nothing.
+EMPTY_PLACE = '<span class="place" aria-hidden="true"></span>'
+
+
+def project_cell(
+    initiative: Initiative, pr: PullRequest | None = None, vscode_failed: str = ""
+) -> str:
+    """The project name, then four place slots (VS Code, local, staging, PR),
+    or `no worktree`. Local and staging stay empty for now. The failure
+    message shows even when the worktree has gone since."""
+    inner = f'<span class="proj">{escape(initiative.project)}</span>'
     if not initiative.worktrees:
-        inner = '<span class="muted">no worktree</span>'
+        inner += '<span class="muted no-wt">no worktree</span>'
     else:
-        inner = "".join(vscode_form(w, initiative.project, initiative.slug) for w in initiative.worktrees)
+        worktree = initiative.worktrees[0]
+        slots = [
+            vscode_form(worktree, initiative.project, initiative.slug),
+            EMPTY_PLACE,
+            EMPTY_PLACE,
+            pr_link(pr) if pr is not None else EMPTY_PLACE,
+        ]
+        inner += f'<span class="places">{"".join(slots)}</span>'
     if vscode_failed and initiative.key == vscode_failed:
         inner += f'<span class="err">{VSCODE_FAILED}</span>'
-    return f'<div class="c-wt" role="cell">{inner}</div>'
+    return f'<div class="c-proj" role="cell">{inner}</div>'
 
 
 def activity_cell(initiative: Initiative, now: datetime) -> str:
@@ -346,6 +367,13 @@ SESSION_ICON = (
     '<svg class="i" aria-hidden="true" viewBox="0 0 16 16">'
     '<path d="M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z"/>'
     '<path d="m5.5 6.5 1.5 1.25-1.5 1.25M8.5 9h2"/></svg>'
+)
+
+# The VS Code ribbon (mockups/dashboard.html, `vscode`), inlined the same way.
+VSCODE_ICON = (
+    '<svg class="i" aria-hidden="true" viewBox="0 0 16 16">'
+    '<path d="M11.5 1.8 14 3v10l-2.5 1.2L4.2 8.4 2 10.2 1 9.6V6.4l1-.6 2.2 1.8z"/>'
+    '<path d="M11.5 1.8v12.4M4.2 7.6 11.5 4M4.2 8.4l7.3 3.6"/></svg>'
 )
 
 
@@ -388,30 +416,29 @@ NO_PRS: Mapping[str, PullRequest] = MappingProxyType({})
 
 
 def pr_link(pr: PullRequest) -> str:
-    """`#<number>` with its state icon; opens the PR in a new tab."""
+    """The PR place icon: its state icon alone, opening the PR in a new tab.
+    The number is in the tooltip and the accessible name."""
     state = pr.state if pr.state in PR_ICONS else "open"
     colour = "pr-open" if state == "open" else "pr-muted"
     icon = (
-        f'<svg class="pr-icon {colour}" aria-hidden="true" width="16" height="16"'
-        f' viewBox="0 0 16 16"><path fill="currentColor" d="{PR_ICONS[state]}"/></svg>'
+        f'<svg class="i {colour}" aria-hidden="true" viewBox="0 0 16 16">'
+        f'<path d="{PR_ICONS[state]}"/></svg>'
     )
+    title = escape(f"{state.capitalize()} PR #{pr.number}, top of the stack, on GitHub")
+    label = escape(f"{state} pull request #{pr.number} (opens in new tab)")
     return (
-        f'<a class="btn btn-2 pr" href="{escape(pr.url)}" target="_blank" rel="noopener">'
-        f'{icon}<span class="sr-only">{state} pull request </span>#{pr.number}'
-        f'<span class="sr-only"> (opens in new tab)</span></a>'
+        f'<a class="place pr" href="{escape(pr.url)}" target="_blank" rel="noopener"'
+        f' title="{title}" aria-label="{label}">{icon}</a>'
     )
 
 
-def actions_cell(initiative: Initiative, pr: PullRequest | None = None) -> str:
-    """`resume` with the stack's last PR beside it on top, the doc actions
-    stacked under it. Empty without a worktree."""
+def actions_cell(initiative: Initiative) -> str:
+    """`resume` on top, the doc actions stacked under it. Empty without a
+    worktree."""
     if not initiative.worktrees:
         return '<div class="c-btns" role="cell"></div>'
     worktree = initiative.worktrees[0]
-    top = [resume_link(worktree, initiative.slug)]
-    if pr is not None:
-        top.append(pr_link(pr))
-    lines = [f'<div class="act-top">{"".join(top)}</div>']
+    lines = [resume_link(worktree, initiative.slug)]
     for text, prompt, label in doc_actions(initiative):
         lines.append(action_link(worktree, prompt, text, LINK, label))
     return f'<div class="c-btns" role="cell">{"".join(lines)}</div>'
@@ -426,15 +453,15 @@ def initiative_row(
     prs: Mapping[str, PullRequest] = NO_PRS,
 ) -> str:
     """One grid row. DOM order: the four cells, then the panel, so Tab runs
-    caret -> worktree -> resume -> PR -> doc chips -> tree links. CSS puts the
+    caret -> VS Code -> PR -> resume -> doc chips -> tree links. CSS puts the
     panel on grid row 2."""
     panel_id = f"panel-{index}"
     is_open = is_open and has_panel(initiative)
     cells = [
         initiative_cell(initiative, panel_id, is_open),
-        worktree_cell(initiative, vscode_failed),
+        project_cell(initiative, prs.get(initiative.key), vscode_failed),
         activity_cell(initiative, now),
-        actions_cell(initiative, prs.get(initiative.key)),
+        actions_cell(initiative),
     ]
     if has_panel(initiative):
         cells.append(panel_cell(initiative, panel_id, is_open, now))
@@ -442,7 +469,7 @@ def initiative_row(
     return f'<div class="{css_class}" role="row">{"".join(cells)}</div>'
 
 
-COLUMN_HEADS = ["Initiative", "Worktree", "Last activity", "Actions"]
+COLUMN_HEADS = ["Initiative", "Project", "Last activity", "Actions"]
 
 
 def header_row() -> str:

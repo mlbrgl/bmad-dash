@@ -111,5 +111,5 @@ def test_github_failure_shows_in_header():
     expected = GOLDEN.read_text(encoding="utf-8")
     # Same page, but the header says GitHub failed and no row has a PR button.
     assert '<span class="err">Couldn\'t reach GitHub</span></header>' in html
-    assert 'class="btn btn-2 pr"' not in html
-    assert 'class="btn btn-2 pr"' in expected
+    assert 'class="place pr"' not in html
+    assert 'class="place pr"' in expected

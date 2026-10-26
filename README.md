@@ -39,8 +39,9 @@ Expand a row to see its forges, specs, walkthroughs and epics, then any tickets
 that sit directly in the initiative folder.
 
 A project is named by its root folder (`--project-root ~/Code/owid-grapher` is
-`owid-grapher`); each row's slug line reads `<project> · <slug>`. When one
-root can't reach GitHub, only its rows lose their PR buttons.
+`owid-grapher`); each row shows it in its own Project cell, and the slug line
+is the slug alone. When one root can't reach GitHub, only its rows lose their
+PR icon.
 
 `/file/<project>/<path>` shows a `.md` (rendered) or `.html` (as is) file, with `<path>`
 relative to that project's `_bmad-output/`. Rendered headings have ids, so a link can point at

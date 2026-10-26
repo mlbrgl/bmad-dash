@@ -29,7 +29,7 @@ code { font-family: var(--mono); font-size: 12px; }
               box-shadow: -40px 0 0 var(--row-hover), 40px 0 0 var(--row-hover); }
 .init > [role="cell"] { grid-row: 1; }
 .init > .panel { grid-row: 2; grid-column: 1 / -1; }
-.c-title, .c-wt, .c-act, .wt { display: flex; flex-direction: column; min-width: 0; }
+.c-title, .c-proj, .c-act { display: flex; flex-direction: column; min-width: 0; }
 .ttl { display: flex; gap: 8px; align-items: baseline; font-weight: 600; font-size: 14.5px; }
 .caret { color: var(--ink-muted); font-size: 10px; width: 10px; flex: none; }
 /* A 24x24 hit area around the 10px caret, without moving the title. */
@@ -40,17 +40,26 @@ code { font-family: var(--mono); font-size: 12px; }
 .toggle[aria-expanded="false"] .caret::before { content: "\25B6"; }
 .toggle[aria-expanded="true"] .caret::before { content: "\25BC"; }
 .slug { font: 12px var(--mono); color: var(--ink-muted); margin: 2px 0 0 18px; }
-form.vscode { margin: 0; min-width: 0; }
-form.vscode + form.vscode { margin-top: 6px; }
-/* The whole worktree block is a button that opens VS Code. */
-.wt { width: 100%; background: none; border: 0; padding: 0; font: inherit;
-      color: inherit; text-align: left; cursor: pointer; }
-.wt:hover .wt-name { text-decoration: underline; }
-.c-wt .err { font-size: 12px; margin-top: 2px; }
-.wt-name { font: 13px var(--mono); }
-.wt-branch { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
-.c-wt .muted, .c-act .muted { font-size: 13px; }
-.slug, .wt-name, .wt-branch, .what { overflow: hidden; text-overflow: ellipsis;
+/* Project cell: the name, then the place icons in four fixed slots, pulled
+   left so the first glyph lines up with the name. */
+.proj { font-size: 13px; }
+.places { display: grid; grid-template-columns: repeat(4, var(--place-size));
+          gap: 4px; margin: 4px 0 0 -6px; }
+/* The VS Code form is not a grid item; its button is the slot. */
+form.vscode { display: contents; }
+.place { display: inline-flex; align-items: center; justify-content: center;
+         width: var(--place-size); height: var(--place-size); border-radius: 6px;
+         color: var(--ink-2); background: none; border: 0; padding: 0;
+         font: inherit; cursor: pointer; }
+span.place { cursor: default; }
+.place svg.i { width: 16px; height: 16px; }
+a.place:hover, button.place:hover { background: var(--place-hover); color: var(--ink);
+                                    text-decoration: none; }
+.place.pr:hover svg.i { color: var(--ink); }
+.no-wt { font-size: 12px; margin-top: 6px; }
+.c-proj .err { font-size: 12px; margin-top: 2px; }
+.c-act .muted { font-size: 13px; }
+.slug, .what { overflow: hidden; text-overflow: ellipsis;
                                      white-space: nowrap; }
 .when { font-size: 13px; font-variant-numeric: tabular-nums; }
 .what { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
@@ -70,10 +79,9 @@ form.vscode + form.vscode { margin-top: 6px; }
 svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor;
         stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
-/* Actions: resume (with the PR beside it) on top, the doc chips stacked
-   under it, right-aligned, 6px apart. */
+/* Actions: resume on top, the doc chips stacked under it, right-aligned,
+   6px apart. */
 .c-btns { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.act-top { display: flex; align-items: center; gap: 6px; }
 
 /* Action chip: a verb, then the session icon. Colour from the class it is
    given (blue by default, warm for unblock). Resume is `btn-1`, filled. */
@@ -93,10 +101,8 @@ svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor;
        padding: 0 12px; border-radius: 6px; white-space: nowrap; cursor: pointer; }
 .btn-1 { background: var(--accent); color: var(--accent-fg); }
 .btn-1:hover { color: var(--accent-fg); background: var(--accent-hover); }
-.btn-2 { background: transparent; border: 1px solid var(--line); color: var(--ink);
-         height: 30px; padding: 0 10px; }
-.btn-2:hover { background: var(--place-hover); }
-.pr-icon { vertical-align: -3px; margin-right: 4px; }
+/* PR state icons are filled octicons, not stroked line icons. */
+.place.pr svg.i { fill: currentColor; stroke: none; }
 .pr-open { color: var(--accent); }
 .pr-muted { color: var(--ink-muted); }
 
