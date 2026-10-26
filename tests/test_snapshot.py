@@ -24,7 +24,7 @@ def ago(**kwargs) -> datetime:
 
 
 def busy_tree() -> list[TreeItem]:
-    """A forge, a spec, a walkthrough and an epic with 2 tickets."""
+    """A forge, a spec, a walkthrough, an epic with 2 tickets and a done epic."""
     tickets = [
         Ticket("1.1", "First ticket", "done", "initiative-busy/epic-one/story-1-plan.md",
                ago(days=3), False),
@@ -43,6 +43,10 @@ def busy_tree() -> list[TreeItem]:
                  report_label="md"),
         TreeItem("epic", "epic-one", "initiative-busy/epic-one/epic-one.md",
                  ago(days=1), OPEN, tickets=tickets, word="in progress"),
+        TreeItem("epic", "epic-zero", "initiative-busy/epic-zero/epic-zero.md",
+                 ago(days=9), FINISHED,
+                 tickets=[Ticket("0.1", "Early ticket", "done", None, ago(days=10), False)],
+                 word="done"),
     ]
 
 

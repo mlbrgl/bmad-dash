@@ -128,7 +128,13 @@ svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor;
 .closed-toggle { padding: 0; background: none; border: 0; font: inherit; font-size: 13px;
                  color: var(--ink-2); cursor: pointer; }
 .closed-toggle:hover { text-decoration: underline; }
-.d1 { padding-left: 20px; } .d2 { padding-left: 40px; }
+/* No indent: a divider closes the docs band, and each epic is a bold header
+   with a gap above it. */
+.t-docs:not(:last-child) { border-bottom: 1px solid var(--line); padding-bottom: 4px;
+                           margin-bottom: 2px; }
+.t-docs .t-row { padding: 4px 0; }
+.t-epic { margin-top: var(--epic-gap); }
+.t-epic .name-link, .t-epic .name-text { font-weight: 600; }
 .name-link { color: var(--ink); }
 .report-link { flex: none; color: var(--ink-muted); margin-left: 8px; font-size: 12px; }
 /* Word colours, in the tree and the Status sentence. */

@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
-from bmad_dash.page import PR_ICONS, relative_time, render_page as render_page_for
+from bmad_dash.page import PR_ICONS, panel_content, relative_time, render_page as render_page_for
 from bmad_dash.prs import PullRequest
 from bmad_dash.rules import (
     action_css,
@@ -125,31 +125,65 @@ def test_every_tree_row_has_four_cells():
         assert row.count('role="cell"') + row.count('role="columnheader"') == 4
 
 
-def test_tree_row_order_kinds_and_indent():
-    rows = rows_of(render([tree_initiative()]))[1:]
-    kinds = [re.search(r'class="t-kind">(.*?)</span>', r).group(1) for r in rows]
-    depths = [re.search(r'class="t-name (d\d)"', r).group(1) for r in rows]
-    assert kinds == ["forge", "epic", "spec", "1.1", "1.2"]
-    # One spec in the epic: tickets nest under it.
-    assert depths == ["d0", "d0", "d1", "d2", "d2"]
+def kinds_of(rows: list[str]) -> list[str]:
+    """Each row's kind cell; a button row reads `button`."""
+    return [(re.search(r'class="t-kind">(.*?)</span>', r) or [None, "button"])[1]
+            if "closed-toggle" not in r else "button" for r in rows]
+
+
+def test_tree_row_order_kinds_and_no_indent():
+    html = render([tree_initiative()])
+    rows = rows_of(html)[1:]
+    # One spec in the epic: tickets follow it.
+    assert kinds_of(rows) == ["forge", "epic", "spec", "1.1", "1.2"]
+    assert re.search(r'class="[^"]*\bd\d\b', html) is None
+    assert 'class="t-name">' in rows[0]
 
 
 def test_tickets_stay_under_the_spec_when_a_walkthrough_follows():
     initiative = tree_initiative()
     initiative.tree[1].children.append(walkthrough())
     rows = rows_of(render([initiative]))[1:]
-    kinds = [re.search(r'class="t-kind">(.*?)</span>', r).group(1) for r in rows]
-    depths = [re.search(r'class="t-name (d\d)"', r).group(1) for r in rows]
-    assert kinds == ["forge", "epic", "spec", "1.1", "1.2", "walk"]
-    assert depths == ["d0", "d0", "d1", "d2", "d2", "d1"]
+    assert kinds_of(rows) == ["forge", "epic", "spec", "1.1", "1.2", "walk"]
 
 
 def test_tickets_sit_under_epic_without_a_single_spec():
     initiative = tree_initiative()
     initiative.tree[1].children = []
-    rows = rows_of(render([initiative]))[1:]
-    depths = [re.search(r'class="t-name (d\d)"', r).group(1) for r in rows]
-    assert depths == ["d0", "d0", "d1", "d1"]
+    html = render([initiative])
+    assert kinds_of(rows_of(html)[1:]) == ["forge", "epic", "1.1", "1.2"]
+    assert re.search(r'class="[^"]*\bd\d\b', html) is None
+
+
+def test_epic_head_row_is_marked_t_epic():
+    html = render([tree_initiative()])
+    assert html.count('class="t-row t-epic" role="row"') == 1
+    epic = html.split('class="t-row t-epic" role="row">')[1]
+    assert epic.startswith('<span role="cell" class="t-kind">epic</span>')
+
+
+def test_docs_band_wraps_initiative_level_docs():
+    html = grid(render([tree_initiative()]))
+    band = html.split('<div class="t-docs" role="rowgroup">')[1].split("</div></div>")[0]
+    assert "forge-a" in band and "epic-a" not in band
+    assert html.index('class="t-docs"') < html.index('t-epic')
+
+
+def test_no_docs_band_without_docs():
+    initiative = tree_initiative()
+    initiative.tree = initiative.tree[1:]
+    assert 't-docs' not in grid(render([initiative]))
+
+
+def test_only_docs_is_just_the_band():
+    initiative = tree_initiative()
+    initiative.tree = initiative.tree[:1]
+    panel = panel_content(initiative, NOW)
+    band = panel.split('<div class="t-docs" role="rowgroup">')[1]
+    # The band's one row, its close, then the table's close: nothing after it.
+    assert band.count('role="row"') == 1
+    assert band.endswith("</span></div></div></div>")
+    assert "t-epic" not in panel and "closed-toggle" not in panel
 
 
 def test_status_words_and_empty_doc_status():
@@ -192,8 +226,8 @@ def test_tree_escapes_names_and_quotes_links():
 
 def test_plain_names_without_files():
     rows = rows_of(render([tree_initiative()]))[1:]
-    assert '<span role="cell" class="t-name d0"><span class="name-text">forge-a</span>' in rows[0]
-    assert '<span role="cell" class="t-name d2"><span class="name-text">Old</span>' in rows[4]
+    assert '<span role="cell" class="t-name"><span class="name-text">forge-a</span>' in rows[0]
+    assert '<span role="cell" class="t-name"><span class="name-text">Old</span>' in rows[4]
 
 
 def test_forge_report_link():
@@ -705,13 +739,13 @@ def test_finished_initiative_tree_has_no_stale_tags():
     assert "stale-tag" not in html.split('class="panel"')[1]
 
 
-def test_top_tickets_come_after_epics_at_depth_zero():
+def test_top_tickets_come_after_epics():
     initiative = tree_initiative()
     initiative.top_tickets = [Ticket("9", "Top <t>", "planned",
                                      "initiative-a/story-top-plan.md", NOW, False)]
     rows = rows_of(render([initiative]))
     assert '<span role="cell" class="t-kind">9</span>' in rows[-1]
-    assert 'class="t-name d0"' in rows[-1]
+    assert 'class="t-name">' in rows[-1]
     assert 'href="/file/proj/initiative-a/story-top-plan.md"' in rows[-1]
     assert "Top &lt;t&gt;" in rows[-1]
 
@@ -1039,6 +1073,8 @@ def item_cells(item, worktrees=True):
     html = render([Initiative("initiative-a", "A", wts, tree=[item])])
     cells = []
     for row in rows_of(html)[1:]:
+        if "closed-toggle" in row:  # a done epic's show button
+            continue
         end = re.search(r"</(?:a|span)></span>", row).end()
         after = row[end:]
         cells.append(after[:after.index('<span role="cell" class="upd"')])
@@ -1225,9 +1261,8 @@ def test_button_sits_under_a_lone_spec_after_the_last_ticket():
     spec = TreeItem("spec", "spec-a", None, NOW, "finished")
     initiative.tree[0].children = [spec, walkthrough()]
     rows = rows_of(render([initiative]))[1:]
-    kinds = [(re.search(r'class="t-kind">(.*?)</span>', r) or [None, "button"])[1] for r in rows]
-    assert kinds == ["epic", "spec", "1.2", "1.1", "button", "walk"]
-    assert 'class="t-name d2"><button' in rows[4]
+    assert kinds_of(rows) == ["epic", "spec", "1.2", "1.1", "button", "walk"]
+    assert 'class="t-name"><button' in rows[4]
 
 
 def test_initiative_level_tickets_get_their_own_button():
@@ -1245,6 +1280,84 @@ def test_closed_buttons_are_not_remembered_and_epics_have_no_fold_script():
     assert 'querySelectorAll("button.toggle")' in html
     assert 'querySelectorAll("button.closed-toggle")' in html
     assert 'button.fold' not in html
+
+
+# --- done epics behind a button ---
+
+DONE_GROUP = "done-epics-proj/initiative-a"
+
+
+def plain_epic(name: str, word: str, tickets=(), children=()) -> TreeItem:
+    return TreeItem("epic", name, f"initiative-a/{name}/{name}.md", NOW, "open",
+                    children=list(children), tickets=list(tickets), word=word)
+
+
+def epics_initiative(*epics: TreeItem, top=()) -> Initiative:
+    initiative = Initiative("initiative-a", "A", [], tickets=[], tree=list(epics))
+    initiative.top_tickets = list(top)
+    return initiative
+
+
+def done_group(html: str) -> str:
+    return html.split(f'id="{DONE_GROUP}" hidden>')[1]
+
+
+def test_done_epic_hides_in_a_group_and_the_button_is_the_last_row():
+    initiative = epics_initiative(plain_epic("epic-a", "in progress", [tk("1.1", "planned")]),
+                                  plain_epic("epic-b", "done"), top=[tk("9", "planned")])
+    html = render([initiative])
+    rows = rows_of(html)[1:]
+    assert kinds_of(rows) == ["epic", "1.1", "9", "epic", "button"]
+    assert '<div id="done-epics-proj/initiative-a" hidden>' in html
+    assert 'role="rowgroup" id="done-epics-' not in html
+    assert "epic-b" in done_group(html) and "epic-a" not in done_group(html)
+    assert html.index("T9") < html.index(DONE_GROUP)
+    assert (f'aria-controls="{DONE_GROUP}" data-show="Show 1 done epic"'
+            ' data-hide="Hide done epics">Show 1 done epic</button>') in rows[-1]
+    assert 'class="closed-toggle" aria-expanded="false"' in rows[-1]
+
+
+def test_done_epic_group_holds_its_children_and_closed_tickets_button():
+    retro = TreeItem("retro", "epic-b-retrospective", None, None, "finished", word="accepted")
+    epic = plain_epic("epic-b", "done", [tk("2.1", "done")], children=[retro])
+    html = render([epics_initiative(plain_epic("epic-a", "in progress"), epic)])
+    group = done_group(html)
+    assert "epic-b-retrospective" in group and "T2.1" in group
+    assert 'id="closed-proj/initiative-a-epic-b" hidden>' in group
+    assert ">Show 1 closed ticket</button>" in group
+    # The done epic's own closed-tickets button sits before the done-epics one.
+    assert html.index("Show 1 closed ticket") < html.index(">Show 1 done epic</button>")
+
+
+def test_two_done_epics_read_plural_in_build_order():
+    initiative = epics_initiative(plain_epic("epic-b", "done"), plain_epic("epic-a", "open"),
+                                  plain_epic("epic-c", "dropped"))
+    html = render([initiative])
+    assert ">Show 2 done epics</button>" in html
+    group = done_group(html)
+    assert group.index("epic-b") < group.index("epic-c")
+    assert "epic-a" not in group
+
+
+def test_dropped_epic_folds():
+    html = render([epics_initiative(plain_epic("epic-a", "dropped"))])
+    assert "epic-a" in done_group(html)
+    assert ">Show 1 done epic</button>" in html
+
+
+def test_no_done_epics_button_when_none_done():
+    html = render([epics_initiative(plain_epic("epic-a", "in progress"),
+                                    plain_epic("epic-b", "to close"))])
+    assert "done-epics-" not in html
+    assert "done epic" not in html
+
+
+def test_epic_stays_open_when_tickets_failed():
+    initiative = epics_initiative(plain_epic("epic-a", ""))
+    initiative.tickets = None
+    html = render([initiative])
+    assert "done-epics-" not in html
+    assert html.index('class="err t-note"') < html.index("epic-a")
 
 
 # --- rules agree: stale retros, dropped epics, close needs finished epics ---

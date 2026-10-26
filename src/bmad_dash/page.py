@@ -63,7 +63,8 @@ def relative_time(when: datetime, now: datetime) -> str:
 
 
 # --- tree panel ---
-# Its own grid: kind · name · status · updated. Nesting indents the name only.
+# Its own grid: kind · name · status · updated. No indent: the docs band,
+# bold epic headers and the kind column carry the grouping.
 
 def file_link(project: str, path: str, text: str, css_class: str, title: str = "") -> str:
     """The one place a file href is built: `/file/<project>/<path>`."""
@@ -76,7 +77,6 @@ def name_cell(
     project: str,
     name: str,
     path: str | None,
-    depth: int,
     report: str | None = None,
     report_label: str = "report",
 ) -> str:
@@ -88,7 +88,7 @@ def name_cell(
         inner = file_link(project, path, name, "name-link")
     if report is not None:
         inner += file_link(project, report, report_label, "report-link")
-    return f'<span role="cell" class="t-name d{depth}">{inner}</span>'
+    return f'<span role="cell" class="t-name">{inner}</span>'
 
 
 def word_cell(word: str) -> str:
@@ -108,9 +108,10 @@ def updated_cell(updated: datetime | None, stale: bool, now: datetime) -> str:
     )
 
 
-def tree_row(kind: str, name: str, word: str, updated: str) -> str:
+def tree_row(kind: str, name: str, word: str, updated: str, css_class: str = "") -> str:
+    row_class = f"t-row {css_class}" if css_class else "t-row"
     return (
-        f'<div class="t-row" role="row"><span role="cell" class="t-kind">'
+        f'<div class="{row_class}" role="row"><span role="cell" class="t-kind">'
         f"{escape(kind)}</span>{name}{word}{updated}</div>"
     )
 
@@ -142,14 +143,13 @@ def item_cell(item: TreeItem, epic: TreeItem | None, worktree: Worktree | None) 
 def ticket_row(
     project: str,
     ticket: Ticket,
-    depth: int,
     now: datetime,
     show_stale: bool,
     worktree: Worktree | None = None,
 ) -> str:
     return tree_row(
         ticket.ref,
-        name_cell(project, ticket.title, ticket.path, depth),
+        name_cell(project, ticket.title, ticket.path),
         ticket_cell(ticket, worktree),
         updated_cell(ticket.updated, show_stale and ticket.stale, now),
     )
@@ -158,7 +158,6 @@ def ticket_row(
 def closed_ticket_rows(
     project: str,
     tickets: list[Ticket],
-    depth: int,
     now: datetime,
     show_stale: bool,
     worktree: Worktree | None,
@@ -167,34 +166,66 @@ def closed_ticket_rows(
     """Open ticket rows, then a hidden group of the done and dropped ones, then
     one button row that shows them. No button when none is closed. Each
     part keeps the tickets' order."""
-    open_rows = [ticket_row(project, t, depth, now, show_stale, worktree)
+    open_rows = [ticket_row(project, t, now, show_stale, worktree)
                  for t in tickets if t.word not in CLOSED_STATES]
     closed = [t for t in tickets if t.word in CLOSED_STATES]
     if not closed:
         return open_rows
     count = len(closed)
     noun = "1 closed ticket" if count == 1 else f"{count} closed tickets"
-    group = "".join(ticket_row(project, t, depth, now, show_stale, worktree) for t in closed)
+    group = "".join(ticket_row(project, t, now, show_stale, worktree) for t in closed)
+    return open_rows + hidden_group(group_id, group, f"Show {noun}", "Hide closed tickets")
+
+
+def hidden_group(group_id: str, group: str, show: str, hide: str,
+                 role: str = ' role="rowgroup"') -> list[str]:
+    """A hidden group, then one button row that shows it. The page script's
+    `closed-toggle` handler swaps the label and the group's `hidden`. Pass
+    `role=""` when the group holds other rowgroups: a rowgroup owns only rows."""
     button = (
         f'<button type="button" class="closed-toggle" aria-expanded="false"'
-        f' aria-controls="{escape(group_id)}" data-show="Show {noun}"'
-        f' data-hide="Hide closed tickets">Show {noun}</button>'
+        f' aria-controls="{escape(group_id)}" data-show="{escape(show)}"'
+        f' data-hide="{escape(hide)}">{escape(show)}</button>'
     )
     button_row = (
         f'<div class="t-row" role="row"><span role="cell"></span>'
-        f'<span role="cell" class="t-name d{depth}">{button}</span>'
+        f'<span role="cell" class="t-name">{button}</span>'
         f'<span role="cell"></span><span role="cell"></span></div>'
     )
-    return open_rows + [
-        f'<div role="rowgroup" id="{escape(group_id)}" hidden>{group}</div>',
-        button_row,
-    ]
+    return [f'<div{role} id="{escape(group_id)}" hidden>{group}</div>', button_row]
+
+
+def is_done_epic(item: TreeItem) -> bool:
+    return item.kind == "epic" and item.word in CLOSED_STATES
+
+
+def done_epic_rows(
+    project: str,
+    epics: list[TreeItem],
+    now: datetime,
+    show_stale: bool,
+    worktree: Worktree | None,
+    group_id: str,
+    closed_prefix: str,
+) -> list[str]:
+    """A hidden group of the done and dropped epics, each rendered as it would
+    be open, then one button row that shows them. Nothing when none."""
+    if not epics:
+        return []
+    count = len(epics)
+    noun = "1 done epic" if count == 1 else f"{count} done epics"
+    group = "".join(
+        row for epic in epics
+        for row in item_rows(project, epic, now, show_stale, worktree,
+                             closed_prefix=closed_prefix)
+    )
+    # No role: it holds the epics' closed-tickets rowgroups.
+    return hidden_group(group_id, group, f"Show {noun}", "Hide done epics", role="")
 
 
 def item_rows(
     project: str,
     item: TreeItem,
-    depth: int,
     now: datetime,
     show_stale: bool,
     worktree: Worktree | None = None,
@@ -211,20 +242,21 @@ def item_rows(
     """
     head = tree_row(
         item.kind,
-        name_cell(project, item.name, item.path, depth, item.report, item.report_label),
+        name_cell(project, item.name, item.path, item.report, item.report_label),
         item_cell(item, epic, worktree),
         updated_cell(item.updated, show_stale and item.state == STALE, now),
+        "t-epic" if item.kind == "epic" else "",
     )
     group_id = f"{closed_prefix}-{item.name}"
     rows = []
     specs = [child for child in item.children if child.kind == "spec"]
     nest_under = specs[0] if len(specs) == 1 else None
     for child in item.children:
-        rows += item_rows(project, child, depth + 1, now, show_stale, worktree, item, closed_prefix)
+        rows += item_rows(project, child, now, show_stale, worktree, item, closed_prefix)
         if child is nest_under:
-            rows += closed_ticket_rows(project, item.tickets, depth + 2, now, show_stale, worktree, group_id)
+            rows += closed_ticket_rows(project, item.tickets, now, show_stale, worktree, group_id)
     if nest_under is None:
-        rows += closed_ticket_rows(project, item.tickets, depth + 1, now, show_stale, worktree, group_id)
+        rows += closed_ticket_rows(project, item.tickets, now, show_stale, worktree, group_id)
     return [head] + rows
 
 
@@ -249,12 +281,24 @@ def panel_content(initiative: Initiative, now: datetime) -> str:
     worktree = initiative.worktrees[0] if initiative.worktrees else None
     project = initiative.project
     closed_prefix = f"closed-{initiative.key}"
-    for item in initiative.tree:
-        rows += item_rows(project, item, 0, now, show_stale, worktree,
-                          closed_prefix=closed_prefix)
-    # Initiative-level tickets come after the epics, at the top level.
-    rows += closed_ticket_rows(project, initiative.top_tickets, 0, now, show_stale, worktree,
+    docs = [item for item in initiative.tree if item.kind != "epic"]
+    epics = [item for item in initiative.tree if item.kind == "epic"]
+    # The docs band: forges, specs, walkthroughs, closed by a divider.
+    doc_rows = [row for item in docs
+                for row in item_rows(project, item, now, show_stale, worktree,
+                                     closed_prefix=closed_prefix)]
+    if doc_rows:
+        rows.append(f'<div class="t-docs" role="rowgroup">{"".join(doc_rows)}</div>')
+    for item in epics:
+        if not is_done_epic(item):
+            rows += item_rows(project, item, now, show_stale, worktree,
+                              closed_prefix=closed_prefix)
+    # Initiative-level tickets come after the open epics.
+    rows += closed_ticket_rows(project, initiative.top_tickets, now, show_stale, worktree,
                                closed_prefix)
+    # Done and dropped epics fold behind one button, the tree's last row.
+    rows += done_epic_rows(project, [e for e in epics if is_done_epic(e)], now, show_stale,
+                           worktree, f"done-epics-{initiative.key}", closed_prefix)
     label = escape(f"{initiative.title} contents")
     return f'{note}<div class="tree" role="table" aria-label="{label}">{"".join(rows)}</div>'
 
