@@ -4,6 +4,7 @@
   --accent: #2563EB; --accent-fg: #FFFFFF; --accent-soft: #EFF4FF;
   --built: #157A3A; --stale: #A34A06; --stale-soft: #FEF6E7;
   --row-hover: #FAFAFA; --tree-row-hover: #F8F8F9; --place-hover: #EDEDF0;
+  --accent-hover: #1D4ED8; --accent-soft-hover: #DCE7FF; --stale-soft-hover: #FCEBCB;
   --chip-height: 28px; --chip-x: 8px; --place-size: 28px; --epic-gap: 14px;
   --cols: minmax(0, 2.4fr) 170px minmax(0, 2.2fr) 150px;
   --tcols: 64px minmax(0, 1fr) 120px 110px;
@@ -17,6 +18,7 @@
     --accent: #6B9BFF; --accent-fg: #0B0B0D; --accent-soft: #18233A;
     --built: #5CC98A; --stale: #F0B060; --stale-soft: #2E2414;
     --row-hover: #1A1A1E; --tree-row-hover: #24242A; --place-hover: #2A2A30;
+    --accent-hover: #8CB2FF; --accent-soft-hover: #22314F; --stale-soft-hover: #3D301B;
   }
 }
 :root[data-theme="dark"] {
@@ -25,4 +27,5 @@
   --accent: #6B9BFF; --accent-fg: #0B0B0D; --accent-soft: #18233A;
   --built: #5CC98A; --stale: #F0B060; --stale-soft: #2E2414;
   --row-hover: #1A1A1E; --tree-row-hover: #24242A; --place-hover: #2A2A30;
+  --accent-hover: #8CB2FF; --accent-soft-hover: #22314F; --stale-soft-hover: #3D301B;
 }

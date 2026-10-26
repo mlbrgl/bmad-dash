@@ -11,6 +11,7 @@
   --accent: #2563EB; --accent-fg: #FFFFFF; --accent-soft: #EFF4FF;
   --built: #157A3A; --stale: #A34A06; --stale-soft: #FEF6E7;
   --row-hover: #FAFAFA; --tree-row-hover: #F8F8F9; --place-hover: #EDEDF0;
+  --accent-hover: #1D4ED8; --accent-soft-hover: #DCE7FF; --stale-soft-hover: #FCEBCB;
   --chip-height: 28px; --chip-x: 8px; --place-size: 28px; --epic-gap: 14px;
   --cols: minmax(0, 2.4fr) 170px minmax(0, 2.2fr) 150px;
   --tcols: 64px minmax(0, 1fr) 120px 110px;
@@ -24,6 +25,7 @@
     --accent: #6B9BFF; --accent-fg: #0B0B0D; --accent-soft: #18233A;
     --built: #5CC98A; --stale: #F0B060; --stale-soft: #2E2414;
     --row-hover: #1A1A1E; --tree-row-hover: #24242A; --place-hover: #2A2A30;
+    --accent-hover: #8CB2FF; --accent-soft-hover: #22314F; --stale-soft-hover: #3D301B;
   }
 }
 :root[data-theme="dark"] {
@@ -32,6 +34,7 @@
   --accent: #6B9BFF; --accent-fg: #0B0B0D; --accent-soft: #18233A;
   --built: #5CC98A; --stale: #F0B060; --stale-soft: #2E2414;
   --row-hover: #1A1A1E; --tree-row-hover: #24242A; --place-hover: #2A2A30;
+  --accent-hover: #8CB2FF; --accent-soft-hover: #22314F; --stale-soft-hover: #3D301B;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--surface-outer); color: var(--ink);
@@ -115,18 +118,22 @@ svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor;
 .chip { display: inline-flex; align-items: center; gap: 5px; height: var(--chip-height);
         padding: 0 var(--chip-x); border-radius: 6px; font-size: 13px; line-height: 1;
         white-space: nowrap; color: var(--accent); background: var(--accent-soft); }
-.chip:hover { text-decoration: underline; }
+.chip:hover { color: var(--accent-hover); background: var(--accent-soft-hover); }
 .chip.st-warm { color: var(--stale); background: var(--stale-soft); }
+.chip.st-warm:hover { background: var(--stale-soft-hover); }
 /* In the tree, pulled left so the verb lines up with the status column. */
 .tree .chip { margin-left: calc(-1 * var(--chip-x)); }
 /* In the row's Actions cell: not pulled, 30px to match resume. */
 .c-btns .chip { height: 30px; margin-left: 0; }
+/* Buttons and chips change colour on hover instead of underlining. */
+.btn:hover, .chip:hover { text-decoration: none; }
 .btn { display: inline-flex; align-items: center; font: inherit; font-size: 13px; font-weight: 500;
        padding: 0 12px; border-radius: 6px; white-space: nowrap; cursor: pointer; }
 .btn-1 { background: var(--accent); color: var(--accent-fg); }
+.btn-1:hover { color: var(--accent-fg); background: var(--accent-hover); }
 .btn-2 { background: transparent; border: 1px solid var(--line); color: var(--ink);
          height: 30px; padding: 0 10px; }
-.btn-2:hover { text-decoration: underline; }
+.btn-2:hover { background: var(--place-hover); }
 .pr-icon { vertical-align: -3px; margin-right: 4px; }
 .pr-open { color: var(--accent); }
 .pr-muted { color: var(--ink-muted); }

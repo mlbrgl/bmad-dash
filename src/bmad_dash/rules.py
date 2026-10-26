@@ -254,7 +254,10 @@ def open_paths(items: list[TreeItem], kind: str) -> list[str]:
 
 def doc_actions(initiative: Initiative) -> list[Action]:
     """The row's actions, stacked under `resume`: `resume forge`, `slice spec`,
-    and `close` (only when `can_close`, and no forge or spec is open)."""
+    and `close` (only when `can_close`, and no forge or spec is open).
+    A finished initiative has none."""
+    if initiative.finished:
+        return []
     actions = []
     forges = open_paths(initiative.tree, "forge")
     specs = open_paths(initiative.tree, "spec")

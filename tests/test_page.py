@@ -456,6 +456,13 @@ def test_finished_row_shows_no_done_or_dropped_word_and_no_close():
         assert ">resume<" in row
 
 
+def test_finished_row_shows_no_doc_actions():
+    forge = TreeItem("forge", "forge-c", "initiative-a/forge-c/forge-c.md", NOW, "open")
+    row = row_html(render([plain(status="done", tree=[forge])]))
+    assert ">resume forge<" not in row
+    assert ">resume<" in row
+
+
 def test_plain_row_has_resume_on_top_and_close_under_it():
     row = row_html(render([plain()]))
     top_end = row.index("</div>", row.index('class="act-top"'))
