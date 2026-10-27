@@ -7,6 +7,7 @@ from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.page import (
     PR_ICONS,
     LocalPreview,
+    StagingPreview,
     panel_content,
     relative_time,
     render_page as render_page_for,
@@ -485,8 +486,8 @@ def slots(html: str) -> list[str]:
     """The place slots of the first Project cell, in order."""
     places = cell(html, "c-proj").split('<span class="places">')[1]
     return re.findall(r'<form class="vscode".*?</form>|<span class="place"[^>]*></span>'
-                      r'|<a class="place (?:pr|local)".*?</a>'
-                      r'|<span class="place local is-down".*?</svg></span>', places)
+                      r'|<a class="place (?:pr|local|staging)".*?</a>'
+                      r'|<span class="place (?:local|staging) is-down".*?</svg></span>', places)
 
 
 def with_preview(preview):
@@ -521,6 +522,42 @@ def test_down_local_slot_is_muted_focusable_span_with_tooltip():
 def test_no_preview_leaves_local_slot_empty():
     found = slots(with_preview(None))
     assert found[1] == EMPTY_SLOT
+
+
+def with_staging(staging):
+    """Render one row, proj/initiative-a, with `staging` as its staging server."""
+    initiative = Initiative("initiative-a", "A", [Worktree(WT, "b")])
+    stagings = {} if staging is None else {"proj/initiative-a": staging}
+    return render_page([initiative], [Path("/root")], now=NOW, stagings=stagings)
+
+
+def test_live_staging_slot_links_to_host_in_new_tab():
+    found = slots(with_staging(StagingPreview("staging-site-b", True)))
+    assert len(found) == 4
+    link = found[2]
+    assert link.startswith('<a class="place staging" href="http://staging-site-b/"')
+    assert 'target="_blank" rel="noopener"' in link
+    label = "Open staging staging-site-b (opens in new tab)"
+    assert f'title="{label}" aria-label="{label}"' in link
+    assert "<circle" in link
+    assert found[1] == EMPTY_SLOT
+
+
+def test_down_staging_slot_is_muted_focusable_span_with_tooltip():
+    found = slots(with_staging(StagingPreview("staging-site-b", False)))
+    assert len(found) == 4
+    place = found[2]
+    assert place.startswith('<span class="place staging is-down"')
+    assert "<a " not in place and "href" not in place
+    assert 'tabindex="0"' in place and 'role="img"' in place
+    text = ("staging-site-b isn&#x27;t answering (Tailscale off, or the server is"
+            " building or asleep): resume offers to start Tailscale")
+    assert f'title="{text}" aria-label="{text}"' in place
+
+
+def test_no_staging_leaves_staging_slot_empty():
+    found = slots(with_staging(None))
+    assert found[2] == EMPTY_SLOT
 
 
 def test_no_worktree_shows_name_and_muted_text_and_no_slots():

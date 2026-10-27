@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from bmad_dash import commands
+from bmad_dash import commands, previews
 from bmad_dash.files import (
     NotFound,
     Refused,
@@ -37,8 +37,14 @@ from bmad_dash.opener import (
     resolve_open_path,
     wrapper_page,
 )
-from bmad_dash.page import LocalPreview, render_page
-from bmad_dash.previews import PreviewConfig, load_config, local_port, probe_batch
+from bmad_dash.page import LocalPreview, StagingPreview, render_page
+from bmad_dash.previews import (
+    PreviewConfig,
+    load_config,
+    local_port,
+    probe_batch,
+    staging_host,
+)
 from bmad_dash.prs import PullRequest
 from bmad_dash.stack import gt_stack, load_topology, stack_prs
 
@@ -106,13 +112,18 @@ def load_root_or_none(
         return None
 
 
-def local_previews(
-    initiatives: list[Initiative], config: dict[str, PreviewConfig]
-) -> dict[str, LocalPreview]:
-    """Initiative key -> its local server, probed now. Only initiatives with
-    a worktree and a config entry that gives a port get one. All probes run
-    in one parallel batch, so the page waits about 2 s at most."""
+def place_previews(
+    initiatives: list[Initiative],
+    config: dict[str, PreviewConfig],
+    prs: dict[str, PullRequest],
+) -> tuple[dict[str, LocalPreview], dict[str, StagingPreview]]:
+    """Initiative key -> its local server, and -> its staging server, probed
+    now. Only initiatives with a worktree and a config entry get either:
+    local needs a port; staging needs an open or draft top PR and a
+    `staging_rule` that gives a host for its branch. Every probe runs in one
+    parallel batch, so the page waits about 2 s at most."""
     ports: dict[str, int] = {}
+    hosts: dict[str, str] = {}
     for initiative in initiatives:
         entry = config.get(initiative.project)
         if entry is None or not initiative.worktrees:
@@ -120,11 +131,26 @@ def local_previews(
         port = local_port(initiative.worktrees[0].path, entry)
         if port is not None:
             ports[initiative.key] = port
-    urls = {key: f"http://localhost:{port}/" for key, port in ports.items()}
-    results = probe_batch({key: [url] for key, url in urls.items()})
-    return {
-        key: LocalPreview(port, results[key][urls[key]]) for key, port in ports.items()
+        pr = prs.get(initiative.key)
+        if entry.staging_rule and pr is not None and pr.state in ("open", "draft"):
+            host = staging_host(entry.staging_rule, pr.head)
+            if host is not None:
+                hosts[initiative.key] = host
+    local_urls = {key: f"http://localhost:{port}/" for key, port in ports.items()}
+    staging_urls = {key: previews.staging_url(host) for key, host in hosts.items()}
+    rows: dict[str, list[str]] = {}
+    for urls in (local_urls, staging_urls):
+        for key, url in urls.items():
+            rows.setdefault(key, []).append(url)
+    results = probe_batch(rows)
+    local = {
+        key: LocalPreview(port, results[key][local_urls[key]]) for key, port in ports.items()
     }
+    staging = {
+        key: StagingPreview(host, results[key][staging_urls[key]])
+        for key, host in hosts.items()
+    }
+    return local, staging
 
 
 def _run_code(args: list[str]) -> None:
@@ -199,7 +225,7 @@ def make_server(
                 prs.update(root_prs or {})  # keys are `<project>/<slug>`: no clashes
             github_failed = any(root_prs is None for _, root_prs in loaded)
             # Read fresh each load, after the initiatives: reload re-probes.
-            previews = local_previews(initiatives, load_config(config_path))
+            local, staging = place_previews(initiatives, load_config(config_path), prs)
             body = render_page(
                 initiatives,
                 roots,
@@ -207,7 +233,8 @@ def make_server(
                 prs=prs,
                 github_failed=github_failed,
                 failed_roots=failed_roots,
-                previews=previews,
+                previews=local,
+                stagings=staging,
             ).encode("utf-8")
             self.send_html(body)
 

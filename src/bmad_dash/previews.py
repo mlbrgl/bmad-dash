@@ -7,6 +7,7 @@ The dashboard only reads: it never writes to a project and starts nothing.
 """
 
 import http.client
+import re
 import sys
 import tomllib
 from collections.abc import Mapping
@@ -175,3 +176,33 @@ def probe_batch(
     finally:
         pool.shutdown(wait=False)
     return results
+
+
+# Branches the owid-lxc rule gives no staging server.
+_NO_STAGING_PREFIXES = ("dependabot/", "dependabot-", "graphite-base-")
+
+
+def _owid_lxc_host(branch: str) -> str | None:
+    """owid/ops' container name for `branch`. Copied from `get_container_name`
+    in owid/ops `shared/shared.sh`: keep the two in step by hand."""
+    if branch.startswith(_NO_STAGING_PREFIXES):
+        return None
+    name = branch.replace("/", "-").replace(".", "-").replace("_", "-")
+    host = ("staging-site-" + name[:28]).rstrip("-")
+    # Ops refuses anything else too; it also keeps the href and probe safe.
+    if not re.fullmatch(r"[A-Za-z0-9-]+", host):
+        return None
+    return host
+
+
+def staging_host(rule: str, branch: str) -> str | None:
+    """The staging host `rule` gives for `branch`, or None (no server, or
+    an unknown rule). Only `owid-lxc` is known."""
+    if rule == "owid-lxc":
+        return _owid_lxc_host(branch)
+    return None
+
+
+def staging_url(host: str) -> str:
+    """`http://<host>/`."""
+    return f"http://{host}/"

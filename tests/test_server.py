@@ -56,9 +56,9 @@ GT_STATE = json.dumps({
 })
 
 
-def pr_json(number, head, base="main"):
+def pr_json(number, head, base="main", state="OPEN", draft=False):
     return {"number": number, "headRefName": head, "baseRefName": base,
-            "state": "OPEN", "isDraft": False,
+            "state": state, "isDraft": draft,
             "url": f"https://github.com/o/r/pull/{number}"}
 
 
@@ -462,3 +462,101 @@ def test_local_slot_muted_when_nothing_answers(project, serve, tmp_path):
 def test_no_config_leaves_local_slots_empty(server):
     html = fetch_page(server)
     assert "place local" not in html
+
+
+# --- staging preview ---
+
+STAGING_CONFIG = '[project]\nstaging_rule = "owid-lxc"\n'
+
+
+def closed_port() -> int:
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def staging_page(project, serve, tmp_path, monkeypatch, port, state="OPEN",
+                 draft=False, config=STAGING_CONFIG):
+    """The page with feature-a's PR in `state`, and every staging host sent
+    to 127.0.0.1:`port` instead of the network."""
+    pr = pr_json(7, "feature-a", state=state, draft=draft)
+    fake_github(monkeypatch, [], lambda args: (0, json.dumps([pr])))
+    monkeypatch.setattr(
+        server_module.previews, "staging_url", lambda host: f"http://127.0.0.1:{port}/"
+    )
+    path = tmp_path / "projects.toml"
+    path.write_text(config)
+    return fetch_page(serve(project, config_path=path))
+
+
+def test_staging_slot_links_when_host_answers(project, serve, tmp_path, monkeypatch):
+    up = serve(project)  # any HTTP server will do as the staging server
+    html = staging_page(project, serve, tmp_path, monkeypatch, up.server_port, draft=True)
+    assert html.count('class="place staging"') == 1
+    assert "Open staging staging-site-feature-a (opens in new tab)" in html
+
+
+def test_staging_slot_muted_when_host_is_down(project, serve, tmp_path, monkeypatch):
+    html = staging_page(project, serve, tmp_path, monkeypatch, closed_port())
+    assert 'class="place staging is-down"' in html
+    assert "staging-site-feature-a isn&#x27;t answering (Tailscale off" in html
+
+
+def test_merged_pr_leaves_staging_slot_empty(project, serve, tmp_path, monkeypatch):
+    up = serve(project)
+    html = staging_page(project, serve, tmp_path, monkeypatch, up.server_port, state="MERGED")
+    assert 'href="https://github.com/o/r/pull/7"' in html  # the PR icon still shows
+    assert "place staging" not in html
+
+
+def test_no_staging_rule_leaves_staging_slot_empty(project, serve, tmp_path, monkeypatch):
+    up = serve(project)
+    html = staging_page(project, serve, tmp_path, monkeypatch, up.server_port,
+                        config="[project]\ndefault_port = 3030\n")
+    assert 'href="https://github.com/o/r/pull/7"' in html
+    assert "place staging" not in html
+
+
+def test_closed_pr_leaves_staging_slot_empty(project, serve, tmp_path, monkeypatch):
+    up = serve(project)
+    html = staging_page(project, serve, tmp_path, monkeypatch, up.server_port, state="CLOSED")
+    assert 'href="https://github.com/o/r/pull/7"' in html
+    assert "place staging" not in html
+
+
+def test_no_pr_leaves_staging_slot_empty(project, serve, tmp_path, monkeypatch):
+    fake_github(monkeypatch, [], lambda args: (0, "[]"))
+    path = tmp_path / "projects.toml"
+    path.write_text(STAGING_CONFIG)
+    html = fetch_page(serve(project, config_path=path))
+    assert "place staging" not in html
+
+
+def test_no_config_leaves_staging_slots_empty(project, serve, monkeypatch):
+    pr = pr_json(7, "feature-a")
+    fake_github(monkeypatch, [], lambda args: (0, json.dumps([pr])))
+    html = fetch_page(serve(project))
+    assert 'href="https://github.com/o/r/pull/7"' in html
+    assert "place staging" not in html
+
+
+def test_closed_draft_pr_leaves_staging_slot_empty(project, serve, tmp_path, monkeypatch):
+    up = serve(project)
+    html = staging_page(project, serve, tmp_path, monkeypatch, up.server_port,
+                        state="CLOSED", draft=True)
+    assert 'href="https://github.com/o/r/pull/7"' in html
+    assert "place staging" not in html
+
+
+def test_local_down_and_staging_up_in_one_row(project, serve, tmp_path, monkeypatch):
+    up = serve(project)
+    port = closed_port()
+    config = f'[project]\ndefault_port = {port}\nstaging_rule = "owid-lxc"\n'
+    html = staging_page(project, serve, tmp_path, monkeypatch, up.server_port, config=config)
+    # feature-a's row probes both URLs in one batch; each keeps its own result.
+    row = next(r for r in html.split('role="row"') if "staging-site-feature-a" in r)
+    assert f"localhost:{port} isn&#x27;t answering" in row
+    assert 'class="place local"' not in row
+    assert '<a class="place staging"' in row

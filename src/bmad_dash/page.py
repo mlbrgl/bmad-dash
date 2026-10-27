@@ -450,16 +450,60 @@ def local_place(preview: LocalPreview | None) -> str:
     )
 
 
+@dataclass(frozen=True)
+class StagingPreview:
+    """A row's staging server: its host, and whether it answered."""
+
+    host: str
+    up: bool
+
+
+# Default `stagings`: no row has a staging server. Read-only, so safe as a default.
+NO_STAGINGS: Mapping[str, StagingPreview] = MappingProxyType({})
+
+# The globe (mockups/dashboard.html, `staging`), inlined: colour follows the text.
+GLOBE_ICON = (
+    '<svg class="i" aria-hidden="true" viewBox="0 0 16 16">'
+    '<circle cx="8" cy="8" r="6"/>'
+    '<path d="M2 8h12M8 2c1.8 1.7 2.6 3.7 2.6 6S9.8 12.3 8 14M8 2C6.2 3.7 5.4 5.7 5.4 8s.8 4.3 2.6 6"/>'
+    "</svg>"
+)
+
+
+def staging_place(preview: StagingPreview | None) -> str:
+    """The staging place icon. Up: a link to the server, in a new tab. Down: a
+    muted globe that isn't a link but takes focus, so its tooltip can be read.
+    No preview (no rule, no host, or no open PR): an empty slot."""
+    if preview is None:
+        return EMPTY_PLACE
+    host = preview.host
+    if preview.up:
+        label = escape(f"Open staging {host} (opens in new tab)")
+        return (
+            f'<a class="place staging" href="{escape(f"http://{host}/")}" target="_blank"'
+            f' rel="noopener" title="{label}" aria-label="{label}">{GLOBE_ICON}</a>'
+        )
+    label = escape(
+        f"{host} isn't answering (Tailscale off, or the server is building or asleep):"
+        " resume offers to start Tailscale"
+    )
+    return (
+        f'<span class="place staging is-down" tabindex="0" role="img"'
+        f' title="{label}" aria-label="{label}">{GLOBE_ICON}</span>'
+    )
+
+
 def project_cell(
     initiative: Initiative,
     pr: PullRequest | None = None,
     vscode_failed: str = "",
     preview: LocalPreview | None = None,
+    staging: StagingPreview | None = None,
 ) -> str:
     """The project name, then four place slots (VS Code, local, staging, PR),
-    or `no worktree`. Local shows `preview` (empty without one); staging stays
-    empty for now. The failure message shows even when the worktree has gone
-    since."""
+    or `no worktree`. Local shows `preview` and staging shows `staging`; each
+    is empty without one. The failure message shows even when the worktree
+    has gone since."""
     inner = f'<span class="proj">{escape(initiative.project)}</span>'
     if not initiative.worktrees:
         inner += '<span class="muted no-wt">no worktree</span>'
@@ -468,7 +512,7 @@ def project_cell(
         slots = [
             vscode_form(worktree, initiative.project, initiative.slug),
             local_place(preview),
-            EMPTY_PLACE,
+            staging_place(staging),
             pr_link(pr) if pr is not None else EMPTY_PLACE,
         ]
         inner += f'<span class="places">{"".join(slots)}</span>'
@@ -590,16 +634,21 @@ def initiative_row(
     vscode_failed: str = "",
     prs: Mapping[str, PullRequest] = NO_PRS,
     previews: Mapping[str, LocalPreview] = NO_PREVIEWS,
+    stagings: Mapping[str, StagingPreview] = NO_STAGINGS,
 ) -> str:
     """One grid row. DOM order: the four cells, then the panel, so Tab runs
-    title toggle -> VS Code -> local -> PR -> resume -> doc chips -> tree links. CSS puts the
+    title toggle -> VS Code -> local -> staging -> PR -> resume -> doc chips -> tree links. CSS puts the
     panel on grid row 2."""
     panel_id = f"panel-{index}"
     is_open = is_open and has_panel(initiative)
     cells = [
         initiative_cell(initiative, panel_id, is_open),
         project_cell(
-            initiative, prs.get(initiative.key), vscode_failed, previews.get(initiative.key)
+            initiative,
+            prs.get(initiative.key),
+            vscode_failed,
+            previews.get(initiative.key),
+            stagings.get(initiative.key),
         ),
         activity_cell(initiative, now),
         actions_cell(initiative),
@@ -650,6 +699,7 @@ def page_content(
     vscode_failed: str = "",
     prs: Mapping[str, PullRequest] = NO_PRS,
     previews: Mapping[str, LocalPreview] = NO_PREVIEWS,
+    stagings: Mapping[str, StagingPreview] = NO_STAGINGS,
 ) -> str:
     """Unfinished rows in the table, finished ones behind Show finished (n).
     `initiatives` come sorted; `roots_text` are already escaped, in CLI order.
@@ -668,7 +718,8 @@ def page_content(
     if current:
         rows = "\n".join(
             initiative_row(
-                initiative, index, index == open_index, now, vscode_failed, prs, previews
+                initiative, index, index == open_index, now, vscode_failed, prs, previews,
+                stagings,
             )
             for index, initiative in enumerate(current)
         )
@@ -683,7 +734,8 @@ def page_content(
         # Panel ids continue after the current rows so they stay unique.
         rows = "\n".join(
             initiative_row(
-                initiative, len(current) + index, False, now, vscode_failed, prs, previews
+                initiative, len(current) + index, False, now, vscode_failed, prs,
+                previews, stagings,
             )
             for index, initiative in enumerate(finished)
         )
@@ -708,6 +760,7 @@ def render_page(
     github_failed: bool = False,
     failed_roots: Sequence[Path] = (),
     previews: Mapping[str, LocalPreview] = NO_PREVIEWS,
+    stagings: Mapping[str, StagingPreview] = NO_STAGINGS,
 ) -> str:
     """The whole page for every root in `roots` (CLI order). `vscode_failed`
     is a `<project>/<slug>` from the URL; it only picks which row shows the
@@ -716,14 +769,15 @@ def render_page(
     has no keys there. `github_failed`: some root couldn't reach GitHub, so
     the header says so. `failed_roots` couldn't load at all: the header names
     each, and the empty state leaves them out. `previews` maps an initiative
-    key to its local server (port and up/down); a key without one shows an
-    empty local slot."""
+    key to its local server (port and up/down), `stagings` to its staging
+    server (host and up/down); a key without one shows an empty slot."""
     if now is None:
         now = datetime.now()
     roots_text = [escape(display_path(root)) for root in roots]
     loaded_text = [escape(display_path(root)) for root in roots if root not in failed_roots]
     content = page_content(
-        by_activity(initiatives), loaded_text, now, vscode_failed, prs, previews
+        by_activity(initiatives), loaded_text, now, vscode_failed, prs, previews,
+        stagings,
     )
     paths = "".join(f'<span class="path">{text}</span>' for text in roots_text)
     errors = f'<span class="err">{GITHUB_FAILED}</span>' if github_failed else ""

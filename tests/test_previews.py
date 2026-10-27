@@ -13,6 +13,8 @@ from bmad_dash.previews import (
     local_url,
     probe,
     probe_batch,
+    staging_host,
+    staging_url,
 )
 
 GRAPHER = PreviewConfig(port_key="ADMIN_SERVER_PORT", default_port=3030)
@@ -231,3 +233,31 @@ def test_hanging_batch_is_bounded(hanging_urls):
     results = probe_batch(rows)
     assert time.monotonic() - start < 3
     assert all(up is False for row in results.values() for up in row.values())
+
+
+# --- staging host ---
+
+@pytest.mark.parametrize("branch, host", [
+    ("a-very-long-branch-name-that-goes-on", "staging-site-a-very-long-branch-name-that"),
+    ("mlbrgl/fix.chart_title", "staging-site-mlbrgl-fix-chart-title"),
+    ("bespoke-viz-search-featured-card-v2", "staging-site-bespoke-viz-search-featured"),
+    ("feat/x--", "staging-site-feat-x"),
+    ("dependabot/npm/x", None),
+    ("dependabot-npm-x", None),
+    ("graphite-base-123", None),
+    ("feat;rm", None),
+])
+def test_owid_lxc_staging_host(branch, host):
+    assert staging_host("owid-lxc", branch) == host
+
+
+def test_unknown_staging_rule_gives_no_host():
+    assert staging_host("other", "x") is None
+
+
+def test_staging_url():
+    assert staging_url("staging-site-x") == "http://staging-site-x/"
+
+
+def test_unresolvable_staging_host_is_down():
+    assert probe("http://staging-site-x.invalid/", timeout=1) is False

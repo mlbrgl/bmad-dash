@@ -44,9 +44,11 @@ def has_github_remote(root: Path) -> bool | None:
 
 
 def shown_state(raw: dict) -> str:
-    if raw.get("isDraft"):
-        return "draft"
-    return str(raw.get("state", "")).lower()  # gh says OPEN, MERGED, CLOSED
+    state = str(raw.get("state", "")).lower()  # gh says OPEN, MERGED, CLOSED
+    # GitHub keeps `isDraft` after a draft is merged or closed: those win.
+    if state in ("merged", "closed"):
+        return state
+    return "draft" if raw.get("isDraft") else state
 
 
 def parse_prs(output: str | None) -> list[PullRequest] | None:
