@@ -444,7 +444,11 @@ def local_place(preview: LocalPreview | None) -> str:
             f'<a class="place local" href="http://{host}/" target="_blank" rel="noopener"'
             f' title="{label}" aria-label="{label}">{LAPTOP_ICON}</a>'
         )
-    label = escape(f"{host} isn't answering: resume offers to start it")
+    # No start command: `resume` offers nothing, so the tooltip doesn't either.
+    label = f"{host} isn't answering"
+    if preview.start:
+        label += ": resume offers to start it"
+    label = escape(label)
     return (
         f'<span class="place local is-down" tabindex="0" role="img"'
         f' title="{label}" aria-label="{label}">{LAPTOP_ICON}</span>'
@@ -485,10 +489,10 @@ def staging_place(preview: StagingPreview | None) -> str:
             f'<a class="place staging" href="{escape(f"http://{host}/")}" target="_blank"'
             f' rel="noopener" title="{label}" aria-label="{label}">{GLOBE_ICON}</a>'
         )
-    label = escape(
-        f"{host} isn't answering (Tailscale off, or the server is building or asleep):"
-        " resume offers to start Tailscale"
-    )
+    label = f"{host} isn't answering (Tailscale off, or the server is building or asleep)"
+    if preview.start:
+        label += ": resume offers to start Tailscale"
+    label = escape(label)
     return (
         f'<span class="place staging is-down" tabindex="0" role="img"'
         f' title="{label}" aria-label="{label}">{GLOBE_ICON}</span>'

@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, unquote
 
+import pytest
+
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
 from bmad_dash.page import (
     PR_ICONS,
@@ -509,13 +511,20 @@ def test_live_local_slot_links_to_port_in_new_tab():
 
 
 def test_down_local_slot_is_muted_focusable_span_with_tooltip():
-    found = slots(with_preview(LocalPreview(3030, False)))
+    found = slots(with_preview(LocalPreview(3030, False, "make up.worktree")))
     assert len(found) == 4
     place = found[1]
     assert place.startswith('<span class="place local is-down"')
     assert "<a " not in place and "href" not in place
     assert 'tabindex="0"' in place and 'role="img"' in place
     text = "localhost:3030 isn&#x27;t answering: resume offers to start it"
+    assert f'title="{text}" aria-label="{text}"' in place
+
+
+@pytest.mark.parametrize("start", [None, ""])
+def test_down_local_tooltip_without_start_command_says_only_down(start):
+    place = slots(with_preview(LocalPreview(3030, False, start)))[1]
+    text = "localhost:3030 isn&#x27;t answering"
     assert f'title="{text}" aria-label="{text}"' in place
 
 
@@ -544,7 +553,7 @@ def test_live_staging_slot_links_to_host_in_new_tab():
 
 
 def test_down_staging_slot_is_muted_focusable_span_with_tooltip():
-    found = slots(with_staging(StagingPreview("staging-site-b", False)))
+    found = slots(with_staging(StagingPreview("staging-site-b", False, "open -a Tailscale")))
     assert len(found) == 4
     place = found[2]
     assert place.startswith('<span class="place staging is-down"')
@@ -552,6 +561,14 @@ def test_down_staging_slot_is_muted_focusable_span_with_tooltip():
     assert 'tabindex="0"' in place and 'role="img"' in place
     text = ("staging-site-b isn&#x27;t answering (Tailscale off, or the server is"
             " building or asleep): resume offers to start Tailscale")
+    assert f'title="{text}" aria-label="{text}"' in place
+
+
+@pytest.mark.parametrize("start", [None, ""])
+def test_down_staging_tooltip_without_start_command_says_only_down(start):
+    place = slots(with_staging(StagingPreview("staging-site-b", False, start)))[2]
+    text = ("staging-site-b isn&#x27;t answering (Tailscale off, or the server is"
+            " building or asleep)")
     assert f'title="{text}" aria-label="{text}"' in place
 
 
