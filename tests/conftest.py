@@ -171,7 +171,7 @@ def files_project(project: Path) -> Path:
 
 
 @pytest.fixture
-def serve():
+def serve(tmp_path: Path):
     """Start servers: `serve(root, **kwargs)` runs `make_server([root], 0, **kwargs)`
     on a daemon thread and returns it; `serve([a, b])` serves several roots.
     Every server is shut down at teardown."""
@@ -180,6 +180,8 @@ def serve():
     def start(roots: Path | list[Path], **kwargs):
         if isinstance(roots, Path):
             roots = [roots]
+        # Never the real projects.toml: a missing file unless a test passes one.
+        kwargs.setdefault("config_path", tmp_path / "missing-projects.toml")
         server = make_server(roots, 0, **kwargs)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         servers.append(server)

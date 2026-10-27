@@ -425,3 +425,40 @@ def test_gt_missing_uses_the_worktree_head(stacked_project, monkeypatch, serve):
     html = get_page(serve(stacked_project))
     assert "feature-a work" in html and "c work" not in html
     assert "stale-tag" not in walkthrough_row(html)
+
+
+# --- local preview ---
+
+def fetch_page(server) -> str:
+    with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/") as response:
+        return response.read().decode()
+
+
+def test_local_slot_links_to_running_worktree_server(project, serve, tmp_path):
+    # Any HTTP server will do as the worktree's local server: another dashboard.
+    local = serve(project)
+    worktree = project.parent / "worktrees" / "wt-a"
+    (worktree / ".env").write_text(f"ADMIN_SERVER_PORT={local.server_port}  # local\n")
+    config = tmp_path / "projects.toml"
+    config.write_text('[project]\nport_key = "ADMIN_SERVER_PORT"\n')
+    html = fetch_page(serve(project, config_path=config))
+    href = f'href="http://localhost:{local.server_port}/"'
+    assert html.count('class="place local"') == 1  # only wt-a's row has a port
+    assert f'<a class="place local" {href} target="_blank"' in html
+
+
+def test_local_slot_muted_when_nothing_answers(project, serve, tmp_path):
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    config = tmp_path / "projects.toml"
+    config.write_text(f"[project]\ndefault_port = {port}\n")
+    html = fetch_page(serve(project, config_path=config))
+    assert f"localhost:{port} isn&#x27;t answering" in html
+    assert 'class="place local"' not in html
+
+
+def test_no_config_leaves_local_slots_empty(server):
+    html = fetch_page(server)
+    assert "place local" not in html

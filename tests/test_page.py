@@ -4,7 +4,13 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from bmad_dash.initiatives import Initiative, Worktree, worktree_id
-from bmad_dash.page import PR_ICONS, panel_content, relative_time, render_page as render_page_for
+from bmad_dash.page import (
+    PR_ICONS,
+    LocalPreview,
+    panel_content,
+    relative_time,
+    render_page as render_page_for,
+)
 from bmad_dash.prs import PullRequest
 from bmad_dash.rules import (
     action_css,
@@ -479,7 +485,42 @@ def slots(html: str) -> list[str]:
     """The place slots of the first Project cell, in order."""
     places = cell(html, "c-proj").split('<span class="places">')[1]
     return re.findall(r'<form class="vscode".*?</form>|<span class="place"[^>]*></span>'
-                      r'|<a class="place pr".*?</a>', places)
+                      r'|<a class="place (?:pr|local)".*?</a>'
+                      r'|<span class="place local is-down".*?</svg></span>', places)
+
+
+def with_preview(preview):
+    """Render one row, proj/initiative-a, with `preview` as its local server."""
+    initiative = Initiative("initiative-a", "A", [Worktree(WT, "b")])
+    previews = {} if preview is None else {"proj/initiative-a": preview}
+    return render_page([initiative], [Path("/root")], now=NOW, previews=previews)
+
+
+def test_live_local_slot_links_to_port_in_new_tab():
+    found = slots(with_preview(LocalPreview(3827, True)))
+    assert len(found) == 4
+    link = found[1]
+    assert link.startswith('<a class="place local" href="http://localhost:3827/"')
+    assert 'target="_blank" rel="noopener"' in link
+    assert 'aria-label="Open localhost:3827 (opens in new tab)"' in link
+    assert "<svg" in link
+    assert found[2] == EMPTY_SLOT
+
+
+def test_down_local_slot_is_muted_focusable_span_with_tooltip():
+    found = slots(with_preview(LocalPreview(3030, False)))
+    assert len(found) == 4
+    place = found[1]
+    assert place.startswith('<span class="place local is-down"')
+    assert "<a " not in place and "href" not in place
+    assert 'tabindex="0"' in place and 'role="img"' in place
+    text = "localhost:3030 isn&#x27;t answering: resume offers to start it"
+    assert f'title="{text}" aria-label="{text}"' in place
+
+
+def test_no_preview_leaves_local_slot_empty():
+    found = slots(with_preview(None))
+    assert found[1] == EMPTY_SLOT
 
 
 def test_no_worktree_shows_name_and_muted_text_and_no_slots():

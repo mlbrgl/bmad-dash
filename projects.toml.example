@@ -1,0 +1,19 @@
+# Preview config for bmad-dash. Copy to projects.toml (gitignored) and edit.
+# One table per project, named by the project's root folder.
+#
+# port_key      .env key in each worktree holding its local server's port
+# default_port  port used when .env doesn't set port_key
+# local_start   command resume offers to start the local server
+# staging_rule  how the staging host is worked out
+# staging_start command resume offers when staging can't be reached
+#
+# A project with no keys (or not listed) shows no local or staging icon.
+
+[owid-grapher]
+port_key = "ADMIN_SERVER_PORT"
+default_port = 3030
+local_start = "make up.worktree"
+staging_rule = "owid-lxc"
+staging_start = "open -a Tailscale"
+
+[etl]

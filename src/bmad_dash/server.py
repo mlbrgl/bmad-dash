@@ -37,7 +37,8 @@ from bmad_dash.opener import (
     resolve_open_path,
     wrapper_page,
 )
-from bmad_dash.page import render_page
+from bmad_dash.page import LocalPreview, render_page
+from bmad_dash.previews import PreviewConfig, load_config, local_port, probe_batch
 from bmad_dash.prs import PullRequest
 from bmad_dash.stack import gt_stack, load_topology, stack_prs
 
@@ -49,6 +50,8 @@ REQUEST_TIMEOUT = 10
 # Seconds a POST body may take in total. Stops a client that sends one byte
 # at a time, each under REQUEST_TIMEOUT, from holding a thread for hours.
 REQUEST_DEADLINE = 10
+# bmad-dash's own preview config, beside pyproject.toml (gitignored).
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "projects.toml"
 
 
 def validate_root(root: Path) -> str | None:
@@ -103,6 +106,27 @@ def load_root_or_none(
         return None
 
 
+def local_previews(
+    initiatives: list[Initiative], config: dict[str, PreviewConfig]
+) -> dict[str, LocalPreview]:
+    """Initiative key -> its local server, probed now. Only initiatives with
+    a worktree and a config entry that gives a port get one. All probes run
+    in one parallel batch, so the page waits about 2 s at most."""
+    ports: dict[str, int] = {}
+    for initiative in initiatives:
+        entry = config.get(initiative.project)
+        if entry is None or not initiative.worktrees:
+            continue
+        port = local_port(initiative.worktrees[0].path, entry)
+        if port is not None:
+            ports[initiative.key] = port
+    urls = {key: f"http://localhost:{port}/" for key, port in ports.items()}
+    results = probe_batch({key: [url] for key, url in urls.items()})
+    return {
+        key: LocalPreview(port, results[key][urls[key]]) for key, port in ports.items()
+    }
+
+
 def _run_code(args: list[str]) -> None:
     """Run `code <args>` with no shell and no output. Does not wait."""
     subprocess.Popen(
@@ -128,10 +152,12 @@ def make_server(
     port: int,
     launch: Callable[[Path], None] = default_launch,
     open_file: Callable[[Path, str], None] = default_open_file,
+    config_path: Path = DEFAULT_CONFIG_PATH,
 ) -> ThreadingHTTPServer:
     """A server for `roots` on 127.0.0.1:`port` (0 picks a free port).
     Root names must be unique (`main` checks). `launch` opens a worktree and
-    `open_file` opens one file; tests pass fakes."""
+    `open_file` opens one file; tests pass fakes. `config_path` is the
+    preview config (`projects.toml`), read on every page load."""
     # Project name -> root. The name is the root folder's name.
     projects = {root.name: root for root in roots}
 
@@ -172,6 +198,8 @@ def make_server(
             for _, root_prs in loaded:
                 prs.update(root_prs or {})  # keys are `<project>/<slug>`: no clashes
             github_failed = any(root_prs is None for _, root_prs in loaded)
+            # Read fresh each load, after the initiatives: reload re-probes.
+            previews = local_previews(initiatives, load_config(config_path))
             body = render_page(
                 initiatives,
                 roots,
@@ -179,6 +207,7 @@ def make_server(
                 prs=prs,
                 github_failed=github_failed,
                 failed_roots=failed_roots,
+                previews=previews,
             ).encode("utf-8")
             self.send_html(body)
 
