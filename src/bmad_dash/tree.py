@@ -31,7 +31,6 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
   `blocked_at` set), `waits on <refs>` (`tickets.py next` lists it as blocked),
   `built` or `in review` (plan status), else the state word.
   Done and dropped tickets always read as their state.
-- Ticket counts: done/total, dropped tickets counted in neither.
 - Initiative-level tickets (those `tickets.py` lists with the initiative folder
   as their `epic`) show after the epics, at the initiative level.
 """
@@ -312,15 +311,6 @@ def ticket_word(raw: dict, next_info: NextInfo | None = None) -> str:
     if raw.get("status") == "in-review":
         return "in review"
     return status_word(state)
-
-
-def ticket_counts(tickets: list[dict] | None) -> tuple[int, int] | None:
-    """(done, total) with dropped tickets in neither; None when tickets are unavailable."""
-    if tickets is None:
-        return None
-    counted = [t for t in tickets if ticket_state(t) != "dropped"]
-    done = sum(1 for t in counted if ticket_state(t) == "done")
-    return done, len(counted)
 
 
 def with_staleness(state: str, updated: datetime | None, now: datetime) -> str:

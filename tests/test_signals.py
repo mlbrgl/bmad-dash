@@ -9,7 +9,6 @@ from conftest import STACK_TIMES
 
 from bmad_dash.initiatives import Worktree, list_initiatives
 from bmad_dash.signals import last_activity, last_commit
-from bmad_dash.tree import ticket_counts
 
 T_OLD = datetime(2026, 10, 1, 9, 0)
 T_MID = datetime(2026, 10, 5, 9, 0)
@@ -145,19 +144,6 @@ def test_project_fixture_matched_worktree_uses_its_commit(project):
 # --- tickets ---
 
 
-def test_tickets_skip_dropped():
-    tickets = [{"state": "done"}, {"state": "done"}, {"state": "review"}, {"state": "dropped"}]
-    assert ticket_counts(tickets) == (2, 3)
-
-
-def test_no_tickets_is_zero_of_zero():
-    assert ticket_counts([]) == (0, 0)
-
-
-def test_tickets_unavailable_is_none():
-    assert ticket_counts(None) is None
-
-
 def test_tickets_py_called_once_per_initiative(project):
     calls = project / "calls.log"
     script = project / "_bmad" / "method" / "scripts" / "tickets.py"
@@ -170,7 +156,7 @@ def test_tickets_py_called_once_per_initiative(project):
 
     initiatives = list_initiatives(project)
     assert calls.read_text() == "x" * len(initiatives)
-    assert {ticket_counts(i.tickets) for i in initiatives} == {(1, 2)}
+    assert {tuple(t["state"] for t in i.tickets or []) for i in initiatives} == {("done", "dropped", "planned")}
 
 
 def test_tie_is_judged_to_the_minute(initiative):

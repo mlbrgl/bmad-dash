@@ -209,7 +209,7 @@ def test_open_file_for_b_walkthrough_opens_in_b_worktree(project, other, serve):
     assert opened == [((wt_o / "src" / "o.py").resolve(), "3")]
 
 
-def test_github_failure_in_one_root_keeps_the_others_buttons(project, other, serve, monkeypatch):
+def test_github_failure_in_one_root_keeps_the_others_pr_icons(project, other, serve, monkeypatch):
     pr = PullRequest(7, "feature-a", "main", "open", "https://github.com/o/r/pull/7")
 
     def topology(root, stack):

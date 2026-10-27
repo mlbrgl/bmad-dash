@@ -115,7 +115,7 @@ def test_untracked_repo_runs_no_gt_and_walks_my_prs(project, monkeypatch, serve)
     assert 'href="https://github.com/o/r/pull/7"' in html
 
 
-def test_gh_failure_in_gt_path_shows_header_and_no_buttons(project, monkeypatch, serve):
+def test_gh_failure_in_gt_path_shows_header_and_no_pr_icons(project, monkeypatch, serve):
     track_with_graphite(project)
     fake_github(monkeypatch, [], lambda args: (1, ""))
     html = get_page(serve(project))

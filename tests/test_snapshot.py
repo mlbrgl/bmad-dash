@@ -115,7 +115,7 @@ def test_empty_page_says_no_initiatives():
 def test_github_failure_shows_in_header():
     html = render_page(initiatives(), [ROOT], NOW, vscode_failed="snapshot-root/initiative-stale", github_failed=True)
     expected = GOLDEN.read_text(encoding="utf-8")
-    # Same page, but the header says GitHub failed and no row has a PR button.
+    # Same page, but the header says GitHub failed and no row has a PR icon.
     assert '<span class="err">Couldn\'t reach GitHub</span></header>' in html
     assert 'class="place pr"' not in html
     assert 'class="place pr"' in expected

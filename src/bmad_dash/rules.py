@@ -17,7 +17,7 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
   (`action_css`). Tree cells only: the row has no status words.
 - A retro's `open items` reads `accepted` under a finished epic (`retro_word`).
 - A finished initiative's tree shows no stale tags.
-- The PR button shows the PR of the highest branch that has one, in the
+- The PR icon shows the PR of the highest branch that has one, in the
   stack starting at the row's branch (Stack's last PR). With Graphite, the
   stack follows `gt state`'s tracked children (`stack_branches`); without it,
   the user's PRs (`row_pr`).

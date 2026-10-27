@@ -985,7 +985,7 @@ def test_now_defaults_to_current_time():
     assert ">just now<" in html
 
 
-# --- PR button ---
+# --- PR icon ---
 
 def pr(number, head, base="main", state="open"):
     return PullRequest(number, head, base, state, f"https://github.com/o/r/pull/{number}")
@@ -1068,7 +1068,7 @@ def test_pr_url_is_escaped():
     assert 'href="https://x/&quot;&gt;&lt;script&gt;"' in html
 
 
-def test_github_failure_shows_header_line_and_no_pr_buttons():
+def test_github_failure_shows_header_line_and_no_pr_icons():
     html = with_prs(None)
     header = html.split('<header class="hdr">')[1].split("</header>")[0]
     assert header.endswith('<span class="err">Couldn\'t reach GitHub</span>')

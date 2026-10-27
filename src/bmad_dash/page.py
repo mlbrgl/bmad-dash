@@ -385,7 +385,7 @@ VSCODE_FAILED = "Couldn't open VS Code"
 
 
 def vscode_label(worktree: Worktree, project: str) -> str:
-    """Tooltip and accessible name of the VS Code button. A worktree folder
+    """Tooltip and accessible name of the VS Code icon. A worktree folder
     named like its project reads as the main checkout."""
     if worktree.path.name == project:
         return f"Open main checkout (branch {worktree.branch}) in VS Code"

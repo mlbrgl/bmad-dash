@@ -78,7 +78,7 @@ def duplicate_names(roots: list[Path]) -> str | None:
 
 def load_root(root: Path) -> tuple[list[Initiative], dict[str, PullRequest] | None]:
     """One root's initiatives and PRs (None when GitHub couldn't be reached).
-    1. `gt state` once: the PR buttons and the initiatives' commits share it.
+    1. `gt state` once: the PR icons and the initiatives' commits share it.
     2. GitHub (remote check, maybe the user's PRs) loads while the
        initiatives do, so initiatives never wait for gh.
     3. The per-stack PR lookups need the initiatives, so they come last."""

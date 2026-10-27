@@ -7,12 +7,12 @@ Rules in `dashboard-status-rules.md` (Stack's last PR):
   worktree has checked out is not a child, so two initiatives on one stack
   each get their own part of it.
 - Every branch of every stack gets one `gh pr list --head` call, all in one
-  parallel batch. The button is the newest PR from the highest branch that
+  parallel batch. The icon is the newest PR from the highest branch that
   has one.
 - `gt` only runs when `<git common dir>/.graphite_repo_config` exists. In an
   untracked repo `gt state` sets Graphite up and writes into `.git`.
 - Without `gt`, or in an untracked repo, the user's PRs are walked instead.
-- `gt_stack` runs once per page load. Its result feeds both the PR buttons
+- `gt_stack` runs once per page load. Its result feeds both the PR icons
   and the initiatives' last commit (Row: Last activity).
 """
 
