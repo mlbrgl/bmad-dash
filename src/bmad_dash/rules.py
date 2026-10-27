@@ -73,7 +73,9 @@ def has_open(items: list[TreeItem], kind: str) -> bool:
 def ticket_action(ticket: Ticket) -> str | None:
     """The verb a ticket's cell offers, or None when it only shows a status."""
     if ticket.word in ("planned", "backlog"):
-        return "start" if ticket.ready else None
+        if not ticket.ready:
+            return None
+        return "build" if ticket.hitl else "auto"
     if ticket.word in ("in progress", "in review"):
         return "resume"
     if ticket.word == "blocked":
@@ -86,8 +88,10 @@ def ticket_action(ticket: Ticket) -> str | None:
 def action_prompt(ticket: Ticket, action: str) -> str:
     """The prompt a ticket's action opens a session with."""
     name = f"{ticket.ref} {ticket.title}"
-    if action == "start":
+    if action == "build":
         return f"/bmad-build {name}"
+    if action == "auto":
+        return f"/bmad-build-auto ticket {ticket.ref}"
     if action == "fix":
         return f"/bmad-ticket Check {name}: it has no state"
     prompt = f"/bmad-build Resume {name}"
@@ -132,26 +136,12 @@ def resume_prompt(slug: str) -> str:
     return f"/bmad Resume work on {slug}"
 
 
-def resume_action(epic: TreeItem) -> Action:
-    """`resume`; after a current rejected retro it also says to address it."""
-    retro = epic_retro(epic)
-    prompt = resume_prompt(epic.name)
-    step = f"resume work on {epic.name}"
-    if retro is not None and retro.word == "rejected" and retro.current and retro.path:
-        prompt += f": address {output_path(retro.path)}"
-        step += " and address its rejected retro"
-    return make_action("resume", prompt, step)
-
-
 def epic_actions(epic: TreeItem) -> list[Action]:
     """The actions an epic's cell offers; [] means it shows a status."""
     slug = epic.name
     auto = make_action("auto", AUTO_PROMPT.format(epic=slug), f"build {slug} unattended")
-    if epic.word == "not started":
-        start = make_action("start", f"/bmad Start work on {slug}", f"start work on {slug}")
-        return [start, auto]
-    if epic.word == "in progress":
-        return [resume_action(epic), auto]
+    if epic.word in ("not started", "in progress"):
+        return [auto]
     if epic.word == "to retro":
         return [make_action("retro", f"/bmad-retrospective {slug}",
                             f"run the retrospective for {slug}")]
@@ -175,7 +165,7 @@ def retro_actions(retro: TreeItem, epic: TreeItem) -> list[Action]:
         return [make_action("plan items", prompt,
                             f"turn the action items of {epic.name} into tickets")]
     if retro.word == "rejected":
-        _, prompt, _ = resume_action(epic)
+        prompt = f"{resume_prompt(epic.name)}: address {output_path(retro.path)}"
         return [make_action("fix", prompt, f"address the rejected retro of {epic.name}")]
     return []
 

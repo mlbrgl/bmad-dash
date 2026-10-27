@@ -148,14 +148,14 @@ def ticket_cell(ticket: Ticket, worktree: Worktree | None) -> str:
 
 
 def item_cell(item: TreeItem, epic: TreeItem | None, worktree: Worktree | None) -> str:
-    """An epic's or retro's actions as links split by `SEP` when the initiative
+    """An epic's or retro's actions as links when the initiative
     has a worktree and there are any, else its word as a grey status."""
     actions = item_actions(item, epic) if worktree is not None else []
     if not actions:
         return word_cell(item_word(item, epic))
     links = [action_link(worktree, prompt, text, LINK, label)
              for text, prompt, label in actions]
-    return f'<span role="cell">{SEP.join(links)}</span>'
+    return f'<span role="cell">{"".join(links)}</span>'
 
 
 ENTRY_TOOLTIP = "No plan yet: opens its entry in tickets.toml"
@@ -547,8 +547,6 @@ def activity_cell(initiative: Initiative, now: datetime) -> str:
             inner += f'<span class="what" title="{text}">{text}</span>'
     return f'<div class="c-act" role="cell">{inner}</div>'
 
-
-SEP = '<span class="sep">·</span>'
 
 # The session bubble (mockups/dashboard.html, `session`), inlined: colour follows the text.
 SESSION_ICON = (

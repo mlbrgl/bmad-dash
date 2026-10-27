@@ -73,7 +73,6 @@ a.place:hover, button.place:hover { background: var(--place-hover); color: var(-
         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
         overflow: hidden; overflow-wrap: anywhere; }
 a.what:hover { text-decoration: underline; color: var(--ink); }
-.sep { color: var(--ink-muted); padding: 0 4px; }
 .err { color: var(--ink-2); }
 .when.is-stale { color: var(--stale); }
 .is-finished, .is-finished .what, .is-finished .st-link { color: var(--ink-muted); }

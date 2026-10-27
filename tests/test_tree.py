@@ -1012,7 +1012,7 @@ def test_failing_next_keeps_tree_and_counts_without_waits_or_ready(tmp_path):
     assert "Couldn't read tickets" not in html
 
 
-def test_failing_next_with_a_worktree_offers_no_start_but_ready_next_does(tmp_path):
+def test_failing_next_with_a_worktree_offers_no_chip_but_ready_next_does(tmp_path):
     tickets = [ticket("1.1", "planned")]
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
@@ -1023,7 +1023,7 @@ def test_failing_next_with_a_worktree_offers_no_start_but_ready_next_does(tmp_pa
     ready = project_with_next(tmp_path / "b", tickets, next_json([{"ref": "1.1"}]),
                               worktree=True)
     html = render_page(list_initiatives(ready, now=NOW), [ready])
-    assert "%2Fbmad-build%201.1" in html
+    assert "%2Fbmad-build-auto%20ticket%201.1" in html
 
 
 def page_of(tmp_path, tickets, epic_setup):

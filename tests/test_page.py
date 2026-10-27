@@ -21,9 +21,10 @@ from bmad_dash.rules import (
     item_actions,
     resume_prompt,
     retro_word,
+    ticket_action,
 )
 from bmad_dash.signals import Activity
-from bmad_dash.tree import Ticket, TreeItem
+from bmad_dash.tree import NextInfo, Ticket, TreeItem, make_ticket
 
 NOW = datetime(2026, 10, 19, 12, 0)
 PROJECT = "proj"
@@ -1195,13 +1196,32 @@ FOLDER = "folder=%2Fx%2Fmy%20wt"
 ICON = '<svg class="i" aria-hidden="true" viewBox="0 0 16 16"><path d="M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z"/><path d="m5.5 6.5 1.5 1.25-1.5 1.25M8.5 9h2"/></svg>'
 
 
-def test_ready_ticket_shows_start_link():
-    html = ticket_action_html("planned", ready=True)
+def test_ready_hitl_ticket_shows_build_link():
+    html = ticket_action_html("planned", ready=True, hitl=True)
     assert html == (
         f'<span role="cell"><a class="st-link chip" href="claude://code/new?{FOLDER}'
         '&amp;q=%2Fbmad-build%204.2%20Ticket%20actions" '
-        'aria-label="start 4.2 Ticket actions">start' + ICON + '</a></span>')
-    assert ">start<svg" in ticket_action_html("backlog", ready=True)
+        'aria-label="build 4.2 Ticket actions">build' + ICON + '</a></span>')
+    assert ">build<svg" in ticket_action_html("backlog", ready=True, hitl=True)
+
+
+def test_ready_non_hitl_ticket_shows_auto_link():
+    html = ticket_action_html("planned", ready=True)
+    assert html == (
+        f'<span role="cell"><a class="st-link chip" href="claude://code/new?{FOLDER}'
+        '&amp;q=%2Fbmad-build-auto%20ticket%204.2" '
+        'aria-label="auto 4.2 Ticket actions">auto' + ICON + '</a></span>')
+
+
+def test_row_without_hitl_key_reads_false_so_ready_ticket_is_auto():
+    raw = {"ref": "4.2", "title": "T", "state": "planned"}
+    folder = Path("/x/out/epic")
+    now = datetime(2026, 1, 1)
+    info = NextInfo(waiting={}, ready={"4.2"})
+    ticket = make_ticket(raw, folder, folder.parent, {}, now, info)
+    assert ticket.hitl is False
+    assert ticket_action(ticket) == "auto"
+    assert make_ticket({**raw, "hitl": True}, folder, folder.parent, {}, now, info).hitl is True
 
 
 def test_not_ready_planned_is_a_status():
@@ -1290,23 +1310,20 @@ def test_to_close_epic_is_one_close_link():
         'aria-label="close: close epic-dashboard in a new session">close' + ICON + '</a></span>')
 
 
-def test_not_started_epic_has_start_and_auto():
+def test_not_started_epic_has_only_auto():
     html = item_cells(epic_item("not started", "epic-several-projects"))[0]
-    assert ">start<svg" in html and ">auto<svg" in html
-    assert 'class="sep">·</span>' in html
-    start, auto = hrefs(html)
-    assert start == "/bmad Start work on epic-several-projects"
+    assert ">auto<svg" in html and ">start<" not in html and "sep" not in html
+    (auto,) = hrefs(html)
     assert auto.startswith("/loop Build epic-several-projects unattended")
     assert auto.endswith("Stop for no other reason.")
 
 
-def test_in_progress_epic_has_resume_and_auto_and_addresses_rejected_retro():
-    html = item_cells(epic_item("in progress"))[0]
-    assert ">resume<svg" in html and ">auto<svg" in html
-    assert hrefs(html)[0] == "/bmad Resume work on epic-x"
-    rejected = item_cells(epic_item("in progress", retro_word="rejected"))[0]
-    assert hrefs(rejected)[0] == (
-        "/bmad Resume work on epic-x: address _bmad-output/initiative-a/epic-x/epic-x-retrospective.md")
+def test_in_progress_epic_has_only_auto_even_with_a_rejected_retro():
+    for retro_word in (None, "rejected"):
+        html = item_cells(epic_item("in progress", retro_word=retro_word))[0]
+        assert ">auto<svg" in html and "resume" not in html
+        (auto,) = hrefs(html)
+        assert auto.startswith("/loop Build epic-x unattended")
 
 
 def test_to_retro_epic_has_retro_only():
@@ -1387,7 +1404,7 @@ def test_item_actions_by_kind():
 
 def test_action_css_unblock_is_warm_else_blue():
     assert action_css("unblock") == "st-warm"
-    for action in ("start", "resume", "fix"):
+    for action in ("build", "auto", "resume", "fix"):
         assert action_css(action) == "st-link"
 
 
@@ -1558,10 +1575,10 @@ def test_epic_stays_open_when_tickets_failed():
 
 # --- rules agree: stale retros, dropped epics, close needs finished epics ---
 
-def test_stale_rejected_retro_is_grey_and_resume_has_no_address_suffix():
+def test_stale_rejected_retro_is_grey_and_the_epic_stays_auto():
     item = epic_item("in progress", retro_word="rejected", current=False)
     assert item_cells(item)[1] == '<span role="cell" class="st-muted">rejected</span>'
-    assert hrefs(item_cells(item)[0])[0] == "/bmad Resume work on epic-x"
+    assert hrefs(item_cells(item)[0])[0].startswith("/loop Build epic-x")
 
 
 def test_stale_open_items_retro_is_grey_without_plan_items():

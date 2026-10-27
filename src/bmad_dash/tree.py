@@ -70,6 +70,8 @@ class Ticket:
     # `_bmad-output/` (without the `#<id>`), and the entry's id. None when it
     # has a file, or its entry has no `id`.
     entry: tuple[str, str] | None = None
+    # `hitl` from the `tickets.py status` row: needs a person; absent reads false.
+    hitl: bool = False
 
 
 @dataclass
@@ -506,6 +508,7 @@ def make_ticket(
         ready=next_info is not None and ref in next_info.ready,
         blocked_reason=str(raw.get("blocked_reason") or ""),
         entry=entry,
+        hitl=bool(raw.get("hitl")),
     )
 
 
