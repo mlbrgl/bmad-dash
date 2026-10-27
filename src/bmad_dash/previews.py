@@ -26,7 +26,7 @@ class PreviewConfig:
 
     port_key: str | None = None  # the `.env` key holding the local port
     default_port: int | None = None  # used when `.env` doesn't give one
-    local_start: str | None = None  # what `resume` runs to start it (6.3)
+    local_start: str | None = None  # what `resume` offers to start it
     staging_start: str | None = None
     staging_rule: str | None = None
 

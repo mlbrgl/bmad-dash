@@ -1,5 +1,6 @@
 import http.client
 import json
+import re
 import socket
 import subprocess
 import sys
@@ -7,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import timedelta
+from urllib.parse import unquote
 
 import pytest
 from conftest import STACK_TIMES, add_walkthrough
@@ -560,3 +562,16 @@ def test_local_down_and_staging_up_in_one_row(project, serve, tmp_path, monkeypa
     assert f"localhost:{port} isn&#x27;t answering" in row
     assert 'class="place local"' not in row
     assert '<a class="place staging"' in row
+
+
+def test_resume_offers_to_start_both_down_previews(project, serve, tmp_path, monkeypatch):
+    port = closed_port()
+    config = (f'[project]\ndefault_port = {port}\nlocal_start = "make up.worktree"\n'
+              'staging_rule = "owid-lxc"\nstaging_start = "open -a Tailscale"\n')
+    html = staging_page(project, serve, tmp_path, monkeypatch, closed_port(), config=config)
+    row = next(r for r in html.split('role="row"') if "staging-site-feature-a" in r)
+    href = re.search(r'<a class="btn btn-1 chip" href="([^"]+)"', row).group(1)
+    prompt = unquote(href.replace("&amp;", "&").split("q=", 1)[1])
+    assert prompt.endswith(
+        f"\nlocalhost:{port} isn't answering: offer to start it with `make up.worktree`"
+        "\nstaging-site-feature-a isn't answering: offer to start it with `open -a Tailscale`")

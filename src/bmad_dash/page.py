@@ -418,6 +418,7 @@ class LocalPreview:
 
     port: int
     up: bool
+    start: str | None = None  # the project's `local_start`, for `resume`
 
 
 # Default `previews`: no row has a local server. Read-only, so safe as a default.
@@ -456,6 +457,7 @@ class StagingPreview:
 
     host: str
     up: bool
+    start: str | None = None  # the project's `staging_start`, for `resume`
 
 
 # Default `stagings`: no row has a staging server. Read-only, so safe as a default.
@@ -578,8 +580,27 @@ def action_link(
     )
 
 
-def resume_link(worktree: Worktree, slug: str) -> str:
-    prompt = resume_prompt(slug)
+def down_line(where: str, start: str | None) -> str:
+    """The `resume` line for a preview that isn't answering. No (or an empty)
+    start command: just say it's down."""
+    if not start:
+        return f"{where} isn't answering"
+    return f"{where} isn't answering: offer to start it with `{start}`"
+
+
+def resume_link(
+    worktree: Worktree,
+    slug: str,
+    preview: LocalPreview | None = None,
+    staging: StagingPreview | None = None,
+) -> str:
+    """`resume`: its prompt adds one line per preview that is down."""
+    lines = [resume_prompt(slug)]
+    if preview is not None and not preview.up:
+        lines.append(down_line(f"localhost:{preview.port}", preview.start))
+    if staging is not None and not staging.up:
+        lines.append(down_line(staging.host, staging.start))
+    prompt = "\n".join(lines)
     return action_link(worktree, prompt, "resume", "btn btn-1",
                        f"resume {slug} in a new session")
 
@@ -614,13 +635,17 @@ def pr_link(pr: PullRequest) -> str:
     )
 
 
-def actions_cell(initiative: Initiative) -> str:
+def actions_cell(
+    initiative: Initiative,
+    preview: LocalPreview | None = None,
+    staging: StagingPreview | None = None,
+) -> str:
     """`resume` on top, the doc actions stacked under it. Empty without a
-    worktree."""
+    worktree. `preview` and `staging` are the row's servers, for `resume`."""
     if not initiative.worktrees:
         return '<div class="c-btns" role="cell"></div>'
     worktree = initiative.worktrees[0]
-    lines = [resume_link(worktree, initiative.slug)]
+    lines = [resume_link(worktree, initiative.slug, preview, staging)]
     for text, prompt, label in doc_actions(initiative):
         lines.append(action_link(worktree, prompt, text, LINK, label))
     return f'<div class="c-btns" role="cell">{"".join(lines)}</div>'
@@ -651,7 +676,9 @@ def initiative_row(
             stagings.get(initiative.key),
         ),
         activity_cell(initiative, now),
-        actions_cell(initiative),
+        actions_cell(
+            initiative, previews.get(initiative.key), stagings.get(initiative.key)
+        ),
     ]
     if has_panel(initiative):
         cells.append(panel_cell(initiative, panel_id, is_open, now))

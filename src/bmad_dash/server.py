@@ -124,10 +124,12 @@ def place_previews(
     parallel batch, so the page waits about 2 s at most."""
     ports: dict[str, int] = {}
     hosts: dict[str, str] = {}
+    starts: dict[str, tuple[str | None, str | None]] = {}  # (local, staging)
     for initiative in initiatives:
         entry = config.get(initiative.project)
         if entry is None or not initiative.worktrees:
             continue
+        starts[initiative.key] = (entry.local_start, entry.staging_start)
         port = local_port(initiative.worktrees[0].path, entry)
         if port is not None:
             ports[initiative.key] = port
@@ -144,10 +146,11 @@ def place_previews(
             rows.setdefault(key, []).append(url)
     results = probe_batch(rows)
     local = {
-        key: LocalPreview(port, results[key][local_urls[key]]) for key, port in ports.items()
+        key: LocalPreview(port, results[key][local_urls[key]], starts[key][0])
+        for key, port in ports.items()
     }
     staging = {
-        key: StagingPreview(host, results[key][staging_urls[key]])
+        key: StagingPreview(host, results[key][staging_urls[key]], starts[key][1])
         for key, host in hosts.items()
     }
     return local, staging

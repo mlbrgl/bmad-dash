@@ -1596,3 +1596,71 @@ def test_vscode_form_names_the_project():
     initiative = Initiative("foo", "Foo", [Worktree(Path("/x"), "main")], project="owid-grapher")
     html = render_page_for([initiative], [Path("/x")], now=NOW)
     assert '<input type="hidden" name="project" value="owid-grapher">' in html
+
+
+# --- resume lines for down previews ---
+
+def resume_prompt_of(html: str) -> str:
+    """The decoded `q` of the first row's `resume` link."""
+    return hrefs(cell(html, "c-btns"))[0]
+
+
+def with_places(preview=None, staging=None):
+    """Render one row, proj/initiative-a, with these local and staging servers."""
+    initiative = Initiative("initiative-a", "A", [Worktree(WT, "b")])
+    previews = {} if preview is None else {"proj/initiative-a": preview}
+    stagings = {} if staging is None else {"proj/initiative-a": staging}
+    return render_page([initiative], [Path("/root")], now=NOW,
+                       previews=previews, stagings=stagings)
+
+
+RESUME = "/bmad Resume work on initiative-a"
+LOCAL_DOWN = LocalPreview(3030, False, "make up.worktree")
+STAGING_DOWN = StagingPreview("staging-site-b", False, "open -a Tailscale")
+
+
+def test_resume_adds_line_for_down_local():
+    assert resume_prompt_of(with_places(LOCAL_DOWN)) == (
+        f"{RESUME}\nlocalhost:3030 isn't answering:"
+        " offer to start it with `make up.worktree`")
+
+
+def test_resume_adds_line_for_down_staging():
+    assert resume_prompt_of(with_places(staging=STAGING_DOWN)) == (
+        f"{RESUME}\nstaging-site-b isn't answering:"
+        " offer to start it with `open -a Tailscale`")
+
+
+def test_resume_adds_local_then_staging_when_both_down():
+    assert resume_prompt_of(with_places(LOCAL_DOWN, STAGING_DOWN)) == (
+        f"{RESUME}\nlocalhost:3030 isn't answering: offer to start it with `make up.worktree`"
+        "\nstaging-site-b isn't answering: offer to start it with `open -a Tailscale`")
+
+
+def test_resume_unchanged_when_neither_down():
+    up = with_places(LocalPreview(3030, True, "make up.worktree"),
+                     StagingPreview("staging-site-b", True, "open -a Tailscale"))
+    assert resume_prompt_of(up) == RESUME
+    assert resume_prompt_of(with_places()) == RESUME
+
+
+def test_resume_line_without_start_command_says_only_down():
+    html = with_places(LocalPreview(3030, False), StagingPreview("staging-site-b", False))
+    assert resume_prompt_of(html) == (
+        f"{RESUME}\nlocalhost:3030 isn't answering\nstaging-site-b isn't answering")
+
+
+def test_down_previews_leave_other_actions_unchanged():
+    spec = TreeItem("spec", "spec-x", "initiative-a/spec-x/spec-x.md", NOW, "open")
+    initiative = Initiative("initiative-a", "A", [Worktree(WT, "b")], tickets=[], tree=[spec])
+    plain = render_page([initiative], [Path("/root")], now=NOW)
+    down = render_page([initiative], [Path("/root")], now=NOW,
+                       previews={"proj/initiative-a": LOCAL_DOWN},
+                       stagings={"proj/initiative-a": STAGING_DOWN})
+    assert hrefs(cell(down, "c-btns"))[1:] == hrefs(cell(plain, "c-btns"))[1:]
+    assert len(hrefs(cell(plain, "c-btns"))) > 1
+
+
+def test_resume_line_with_empty_start_command_says_only_down():
+    html = with_places(LocalPreview(3030, False, ""))
+    assert resume_prompt_of(html) == f"{RESUME}\nlocalhost:3030 isn't answering"
