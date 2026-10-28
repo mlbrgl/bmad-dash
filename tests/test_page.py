@@ -17,6 +17,7 @@ from bmad_dash.page import (
 from bmad_dash.prs import PullRequest
 from bmad_dash.rules import (
     action_css,
+    can_close,
     doc_actions,
     item_actions,
     resume_prompt,
@@ -1556,6 +1557,30 @@ def test_dropped_epic_folds():
     html = render([epics_initiative(plain_epic("epic-a", "dropped"))])
     assert "epic-a" in done_group(html)
     assert ">Show 1 done epic</button>" in html
+
+
+def test_dropped_epic_with_an_open_ticket_stays_in_view_and_blocks_close():
+    initiative = epics_initiative(plain_epic("epic-a", "dropped", [tk("1.1", "planned")]))
+    html = render([initiative])
+    assert "done-epics-" not in html
+    assert kinds_of(rows_of(html)[1:]) == ["epic", "1.1"]
+    assert ">dropped<" in html
+    assert not can_close(initiative)
+    assert ">close<" not in html
+
+
+def test_dropped_epic_with_every_ticket_closed_folds():
+    initiative = epics_initiative(plain_epic("epic-a", "dropped", [tk("1.1", "dropped")]))
+    assert "epic-a" in done_group(render([initiative]))
+
+
+def test_show_hide_toggles_carry_a_silent_caret():
+    css = (Path(__file__).parents[1] / "src/bmad_dash/assets/page.css").read_text()
+    for toggle in ("closed-toggle", "show-finished"):
+        assert f".{toggle}::before" in css
+        assert f'.{toggle}[aria-expanded="true"]::before' in css
+    # Empty alt text: screen readers don't read the triangle.
+    assert 'content: "\\25B6" / ""' in css and 'content: "\\25BC" / ""' in css
 
 
 def test_no_done_epics_button_when_none_done():

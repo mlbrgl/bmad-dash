@@ -175,6 +175,13 @@ svg.i { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor;
 .closed-toggle { padding: 0; background: none; border: 0; font: inherit; font-size: 13px;
                  color: var(--ink-2); cursor: pointer; }
 .closed-toggle:hover { text-decoration: underline; }
+/* The show/hide toggles carry the caret, in their own ink-2. Inline-block
+   keeps it out of the hover underline; the empty alt text keeps it out of
+   the button's name. */
+.closed-toggle::before, .show-finished::before {
+  display: inline-block; width: 10px; margin-right: 6px; font-size: 10px; content: "\25B6" / ""; }
+.closed-toggle[aria-expanded="true"]::before,
+.show-finished[aria-expanded="true"]::before { content: "\25BC" / ""; }
 /* No indent: a divider closes the docs band, and each epic is a bold header
    with a gap above it. */
 .t-docs:not(:last-child) { border-bottom: 1px solid var(--line); padding-bottom: 4px;

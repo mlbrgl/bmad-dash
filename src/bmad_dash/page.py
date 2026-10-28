@@ -27,6 +27,7 @@ from bmad_dash.rules import (
     action_prompt,
     by_activity,
     doc_actions,
+    has_open_ticket,
     is_stale,
     item_actions,
     item_word,
@@ -241,7 +242,10 @@ def hidden_group(group_id: str, group: str, show: str, hide: str,
 
 
 def is_done_epic(item: TreeItem) -> bool:
-    return item.kind == "epic" and item.word in CLOSED_STATES
+    """Done or dropped, with no open ticket. A dropped epic with an open
+    ticket stays in view: that ticket blocks `close` (CAP-4)."""
+    return (item.kind == "epic" and item.word in CLOSED_STATES
+            and not has_open_ticket([item]))
 
 
 def done_epic_rows(
