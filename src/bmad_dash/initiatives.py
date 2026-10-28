@@ -2,6 +2,12 @@
 
 A worktree works on an initiative when its own
 `_bmad/custom/config.user.toml` has `[core] active_initiative = "<slug>"`.
+
+The project's `_bmad-output/backlog/` holds tickets with no initiative or
+epic. It reads as one more row (`load_backlog`): its tickets at the top
+level, its links opening in the main checkout, since it belongs to the
+project, not an initiative. No row when the folder is missing or holds no
+ticket.
 """
 
 from __future__ import annotations
@@ -60,6 +66,8 @@ class Initiative:
     status: str = ""
     # The project's folder name (`root.name`); set by `make_initiative`.
     project: str = ""
+    # The project's backlog row, not an initiative (`load_backlog`).
+    backlog: bool = False
 
     @property
     def key(self) -> str:
@@ -223,3 +231,39 @@ def list_initiatives(
             ),
             initiative_dirs,
         ))
+
+
+BACKLOG = "backlog"
+
+
+def load_backlog(root: Path, now: datetime | None = None) -> Initiative | None:
+    """The project's `_bmad-output/backlog/` as a row, or None when the folder
+    is missing or holds no ticket. Its tickets sit at the top level; its
+    worktree is the main checkout (the first `git worktree list` gives).
+    When `tickets.py` fails the row stays, so its panel can say so."""
+    if now is None:
+        now = datetime.now()
+    backlog_dir = root / "_bmad-output" / BACKLOG
+    if not backlog_dir.is_dir():
+        return None
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        next_future = pool.submit(load_next, root, backlog_dir)
+        tickets_data = load_tickets(root, backlog_dir)
+        next_info = next_future.result()
+    tickets = tickets_data.tickets if tickets_data else None
+    top_tickets = initiative_tickets(backlog_dir, tickets, now, next_info)
+    if tickets is not None and not top_tickets:
+        return None
+    worktrees = list_worktrees(root) or []
+    return Initiative(
+        slug=BACKLOG,
+        title="Backlog",
+        worktrees=worktrees[:1],
+        tickets=tickets,
+        next_info=next_info,
+        top_tickets=top_tickets,
+        # Its plans only: the main checkout's commits aren't backlog work.
+        activity=last_activity(backlog_dir, [], []),
+        project=root.name,
+        backlog=True,
+    )

@@ -5,7 +5,13 @@ from pathlib import Path
 
 from conftest import STACK_TIMES, add_walkthrough, git, write_config, write_initiative
 
-from bmad_dash.initiatives import Worktree, active_initiative, list_initiatives, make_initiative
+from bmad_dash.initiatives import (
+    Worktree,
+    active_initiative,
+    list_initiatives,
+    load_backlog,
+    make_initiative,
+)
 from bmad_dash.page import render_page
 from bmad_dash.stack import GraphiteStack
 from bmad_dash.tree import OPEN, STALE
@@ -185,3 +191,53 @@ def test_trunk_keeps_its_own_commit(stacked_project):
 def test_detached_keeps_its_own_commit(stacked_project):
     wt_b = stacked_project.parent / "worktrees" / "wt-b"
     assert make_matched(stacked_project, Worktree(wt_b, "detached"), CHAIN).activity.text == "init"
+
+
+# --- backlog ---
+
+def write_fake_backlog_tickets(project: Path, tickets: list[dict], refine: list[dict]) -> None:
+    """A fake tickets.py: `status` lists `tickets`, `next` lists `refine` as ready to refine."""
+    status = json.dumps({"tickets": tickets})
+    next_ = json.dumps({"ready_to_start": [], "blocked": [], "ready_to_refine": refine})
+    script = project / "_bmad" / "method" / "scripts" / "tickets.py"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "import sys\n"
+        f"print({next_!r} if 'next' in sys.argv else {status!r})\n"
+    )
+
+
+BACKLOG_TICKET = {"epic": "backlog", "ref": "2", "id": 2, "title": "One-off",
+                  "state": "backlog", "file": "story-one-off.md"}
+
+
+def test_backlog_row_holds_its_tickets_and_opens_in_main_checkout(project):
+    (project / "_bmad-output" / "backlog").mkdir()
+    (project / "_bmad-output" / "backlog" / "story-one-off.md").write_text("# One-off\n")
+    write_fake_backlog_tickets(project, [BACKLOG_TICKET], [{"ref": "2"}])
+
+    backlog = load_backlog(project)
+    assert (backlog.slug, backlog.title, backlog.key) == ("backlog", "Backlog", "project/backlog")
+    assert backlog.backlog and backlog.tree == []
+    assert backlog.worktrees == [Worktree(project, "main")]
+    [ticket] = backlog.top_tickets
+    assert (ticket.ref, ticket.path, ticket.refine) == ("2", "backlog/story-one-off.md", True)
+
+
+def test_no_backlog_row_without_folder_or_tickets(project):
+    write_fake_backlog_tickets(project, [], [])
+    assert load_backlog(project) is None
+    (project / "_bmad-output" / "backlog").mkdir()
+    assert load_backlog(project) is None
+
+
+def test_backlog_row_stays_when_tickets_fail(project):
+    (project / "_bmad-output" / "backlog").mkdir()
+    backlog = load_backlog(project)  # no tickets.py
+    assert backlog.tickets is None
+
+
+def test_backlog_is_not_an_initiative(project):
+    (project / "_bmad-output" / "backlog").mkdir()
+    write_fake_backlog_tickets(project, [BACKLOG_TICKET], [])
+    assert "backlog" not in by_slug(project)

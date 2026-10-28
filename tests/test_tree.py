@@ -1055,3 +1055,24 @@ def test_done_epic_with_an_open_ticket_and_current_open_items_retro_shows_plan_i
         write_dated_retro(epic, "accepted-with-open-items", NOW - timedelta(days=1))
     html = page_of(tmp_path, [ticket("1.1", "in-progress")], setup)
     assert ">plan items<svg" in html
+
+
+def test_load_next_reads_ready_to_refine(tmp_path, initiative):
+    write_fake_next(tmp_path, json.dumps(
+        {"ready_to_start": [], "blocked": [], "ready_to_refine": [{"ref": "2"}]}))
+    info = load_next(tmp_path, initiative)
+    assert info == NextInfo(waiting={}, ready=set(), refine={"2"})
+
+
+def test_load_next_bad_ready_to_refine_is_none(tmp_path, initiative):
+    write_fake_next(tmp_path, json.dumps(
+        {"ready_to_start": [], "blocked": [], "ready_to_refine": [{"ref": 2}]}))
+    assert load_next(tmp_path, initiative) is None
+
+
+def test_refine_flag_reaches_the_ticket(initiative):
+    rows = [ticket("1", "backlog")]
+    rows[0]["epic"] = initiative.name
+    info = NextInfo(waiting={}, ready=set(), refine={"1"})
+    [top] = initiative_tickets(initiative, rows, NOW, info)
+    assert (top.word, top.ready, top.refine) == ("backlog", False, True)

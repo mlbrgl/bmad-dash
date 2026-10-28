@@ -4,7 +4,7 @@ import re
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import pytest
 
@@ -167,6 +167,24 @@ def test_server_merges_roots_newest_first_with_one_show_finished(project, other,
     assert "Show finished (2)" in html
     finished = rows(html.split('id="finished"')[1])
     assert sorted(finished) == ["other · initiative-b-done", "project · initiative-a-done"]
+
+
+def test_server_shows_each_backlog_after_every_initiative(project, other, serve):
+    from test_initiatives import BACKLOG_TICKET, write_fake_backlog_tickets
+
+    for root in (project, other):
+        (root / "_bmad-output" / "backlog").mkdir()
+        write_fake_backlog_tickets(root, [BACKLOG_TICKET], [{"ref": "2"}])
+    # Newer than every initiative, still last.
+    plan = other / "_bmad-output" / "backlog" / "story-one-off-plan.md"
+    plan.write_text("---\nticket: story-one-off\n---\n")
+    html = get_page(serve([project, other]))
+    current = rows(html.split('id="finished"')[0])
+    assert sorted(current[-2:]) == ["other · backlog", "project · backlog"]
+    assert all("backlog" not in name for name in current[:-2])
+    # B's backlog ticket opens in B's main checkout.
+    refine = "&amp;q=%2Fbmad-ticket%20Refine%202%20One-off"
+    assert "folder=" + quote(str(other), safe="") + refine in html
 
 
 def test_file_route_serves_from_each_root(project, other, serve):

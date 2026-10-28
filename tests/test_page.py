@@ -1723,3 +1723,50 @@ def test_down_previews_leave_other_actions_unchanged():
 def test_resume_line_with_empty_start_command_says_only_down():
     html = with_places(LocalPreview(3030, False, ""))
     assert resume_prompt_of(html) == f"{RESUME}\nlocalhost:3030 isn't answering"
+
+
+def test_ticket_ready_to_refine_shows_refine_link():
+    html = ticket_action_html("backlog", refine=True)
+    assert html == (
+        f'<span role="cell"><a class="st-link chip" href="claude://code/new?{FOLDER}'
+        '&amp;q=%2Fbmad-ticket%20Refine%204.2%20Ticket%20actions" '
+        'aria-label="refine 4.2 Ticket actions">refine' + ICON + '</a></span>')
+    assert ">refine<svg" in ticket_action_html("planned", refine=True)
+
+
+# --- backlog row ---
+
+def backlog_row(**kwargs) -> Initiative:
+    """A backlog row on the main checkout with one ticket ready to refine."""
+    ticket = Ticket("2", "One-off", "backlog", "backlog/story-one-off.md", NOW, False,
+                    refine=True)
+    kwargs.setdefault("top_tickets", [ticket])
+    return Initiative("backlog", "Backlog", [Worktree(Path("/x/main"), "main")],
+                      tickets=[{"state": "backlog"}], backlog=True, **kwargs)
+
+
+def test_backlog_row_comes_after_newer_initiatives():
+    newer = backlog_row(activity=Activity(NOW, "plan", "plan"))
+    older = plain(activity=Activity(NOW - timedelta(days=3), "x", "commit"))
+    html = render([newer, older])
+    assert grid(html).index("initiative-a") < grid(html).index(">Backlog<")
+
+
+def test_backlog_row_has_no_resume_or_close_and_starts_closed():
+    row = backlog_row(activity=Activity(NOW, "plan", "plan"))
+    html = render([row])
+    assert cell(html, "c-btns") == ""
+    assert 'aria-expanded="false"' in html  # never the row opened by default
+
+
+def test_backlog_ticket_action_opens_in_main_checkout():
+    html = render([backlog_row()])
+    assert ('href="claude://code/new?folder=%2Fx%2Fmain'
+            '&amp;q=%2Fbmad-ticket%20Refine%202%20One-off"') in html
+
+
+def test_backlog_closed_tickets_fold_behind_the_button():
+    done = Ticket("1", "Old", "done", None, NOW, False)
+    html = render([backlog_row(top_tickets=[done])])
+    assert "Show 1 closed ticket" in html
+    assert 'id="closed-proj/backlog" hidden' in html

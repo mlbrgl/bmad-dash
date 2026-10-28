@@ -93,6 +93,22 @@ def initiatives() -> list[Initiative]:
             activity=Activity(ago(days=2), "Closed it", "memlog"),
             status="done",
         ),
+        # Newest activity, still after every initiative.
+        Initiative(
+            slug="backlog",
+            project="snapshot-root",
+            title="Backlog",
+            worktrees=[Worktree(ROOT, "main")],
+            tickets=[{"state": "backlog"}, {"state": "done"}],
+            top_tickets=[
+                Ticket("2", "One-off <task>", "backlog", "backlog/story-one-off.md",
+                       ago(days=1), False, refine=True),
+                Ticket("1", "Old one-off", "done", "backlog/bug-old.md", ago(days=5), False),
+            ],
+            activity=Activity(ago(minutes=1), "story-one-off-plan.md", "plan",
+                              "backlog/story-one-off-plan.md"),
+            backlog=True,
+        ),
     ]
 
 

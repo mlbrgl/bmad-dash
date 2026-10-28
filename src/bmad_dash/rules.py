@@ -4,6 +4,8 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
 (Row, Stack's last PR):
 
 - Rows sort by newest last activity first, then those without activity.
+  Backlog rows (a project's `backlog/`, `Initiative.backlog`) come after
+  every initiative, sorted the same way.
 - A row is stale when its last activity is `STALE_AFTER` old or older,
   unless the initiative is finished.
 - The row's Actions are its doc actions (`doc_actions`), stacked under
@@ -11,7 +13,11 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
   `tickets.toml` beside it), and `close`. `close` shows only when the
   initiative is not finished, its tickets loaded, no ticket open at any level
   (the tree or the initiative folder), and no epic open. Counts play no part.
-  Without a worktree the row shows no actions.
+  Without a worktree the row shows no actions. A backlog row has neither
+  `resume` nor doc actions: only its tickets act.
+- A `planned` or `backlog` ticket in `tickets.py next` `ready_to_refine`
+  offers `refine` (it needs full acceptance criteria before it builds);
+  one in `ready_to_start` offers `build` (hitl) or `auto`.
 - Statuses have three colours (`status_class`): green built, grey (the
   default) nothing to do, warm blocked. Actions are blue, warm for `unblock`
   (`action_css`). Tree cells only: the row has no status words.
@@ -73,6 +79,8 @@ def has_open(items: list[TreeItem], kind: str) -> bool:
 def ticket_action(ticket: Ticket) -> str | None:
     """The verb a ticket's cell offers, or None when it only shows a status."""
     if ticket.word in ("planned", "backlog"):
+        if ticket.refine:
+            return "refine"
         if not ticket.ready:
             return None
         return "build" if ticket.hitl else "auto"
@@ -94,6 +102,8 @@ def action_prompt(ticket: Ticket, action: str) -> str:
         return f"/bmad-build-auto ticket {ticket.ref}"
     if action == "fix":
         return f"/bmad-ticket Check {name}: it has no state"
+    if action == "refine":
+        return f"/bmad-ticket Refine {name}"
     prompt = f"/bmad-build Resume {name}"
     if action == "unblock" and ticket.blocked_reason:
         prompt += f": blocked: {ticket.blocked_reason}"
@@ -245,8 +255,8 @@ def open_paths(items: list[TreeItem], kind: str) -> list[str]:
 def doc_actions(initiative: Initiative) -> list[Action]:
     """The row's actions, stacked under `resume`: `resume forge`, `slice spec`,
     and `close` (only when `can_close`, and no forge or spec is open).
-    A finished initiative has none."""
-    if initiative.finished:
+    A finished initiative has none, nor does a backlog row."""
+    if initiative.finished or initiative.backlog:
         return []
     actions = []
     forges = open_paths(initiative.tree, "forge")
@@ -273,11 +283,13 @@ def tree_shows_stale(initiative: Initiative) -> bool:
 
 
 def by_activity(initiatives: list[Initiative]) -> list[Initiative]:
-    """Newest last activity first, then those without activity.
+    """Newest last activity first, then those without activity; backlog rows
+    after every initiative, in the same order.
     Sorting is stable, so ties keep their incoming (slug) order."""
     active = [i for i in initiatives if i.activity is not None]
     quiet = [i for i in initiatives if i.activity is None]
-    return sorted(active, key=lambda i: i.activity.when, reverse=True) + quiet
+    rows = sorted(active, key=lambda i: i.activity.when, reverse=True) + quiet
+    return [i for i in rows if not i.backlog] + [i for i in rows if i.backlog]
 
 
 NO_CLAIMS: frozenset[str] = frozenset()

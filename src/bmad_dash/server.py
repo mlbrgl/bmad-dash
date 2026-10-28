@@ -27,6 +27,7 @@ from bmad_dash.initiatives import (
     Initiative,
     initiative_worktree,
     list_initiatives,
+    load_backlog,
     list_worktrees,
     worktree_id,
 )
@@ -90,12 +91,16 @@ def load_root(root: Path) -> tuple[list[Initiative], dict[str, PullRequest] | No
     1. `gt state` once: the PR icons and the initiatives' commits share it.
     2. GitHub (remote check, maybe the user's PRs) loads while the
        initiatives do, so initiatives never wait for gh.
-    3. The per-stack PR lookups need the initiatives, so they come last."""
+    3. The per-stack PR lookups need the initiatives, so they come last.
+    The backlog row (if any) loads alongside and comes last; it has no PR."""
     stack = gt_stack(root)
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         topology = pool.submit(load_topology, root, stack)
+        backlog = pool.submit(load_backlog, root)
         initiatives = list_initiatives(root, stack=stack)
         prs = stack_prs(root, initiatives, topology.result())
+        if backlog.result() is not None:
+            initiatives.append(backlog.result())
     return initiatives, prs
 
 

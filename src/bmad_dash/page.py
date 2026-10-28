@@ -3,7 +3,9 @@
 The page is a server-rendered ARIA grid. Each initiative is one row of four
 cells (Initiative, Project, Last activity, Actions), with its tree as a
 full-width panel under it. The only script opens and closes panels, reveals
-closed tickets, and remembers which panels are open.
+closed tickets, and remembers which panels are open. A project's backlog is
+one more row, after the initiatives: its panel holds only its tickets, and
+its Actions cell is empty.
 
 What a row says comes from `rules.py`; this module only turns it into HTML.
 The CSS and JS live in `assets/` and are inlined.
@@ -647,8 +649,9 @@ def actions_cell(
     staging: StagingPreview | None = None,
 ) -> str:
     """`resume` on top, the doc actions stacked under it. Empty without a
-    worktree. `preview` and `staging` are the row's servers, for `resume`."""
-    if not initiative.worktrees:
+    worktree, and for a backlog row (nothing to resume: its tickets act).
+    `preview` and `staging` are the row's servers, for `resume`."""
+    if not initiative.worktrees or initiative.backlog:
         return '<div class="c-btns" role="cell"></div>'
     worktree = initiative.worktrees[0]
     lines = [resume_link(worktree, initiative.slug, preview, staging)]
@@ -715,10 +718,11 @@ def only_close(initiative: Initiative) -> bool:
 
 def newest_index(initiatives: list[Initiative]) -> int | None:
     """Index of the initiative with a tree and the newest activity (first on
-    ties), or None. Close-only initiatives are skipped."""
+    ties), or None. Close-only initiatives and backlog rows are skipped."""
     best = None
     for index, initiative in enumerate(initiatives):
-        if initiative.activity is None or not has_panel(initiative) or only_close(initiative):
+        if (initiative.activity is None or not has_panel(initiative)
+                or only_close(initiative) or initiative.backlog):
             continue
         if best is None or initiative.activity.when > initiatives[best].activity.when:
             best = index

@@ -33,6 +33,8 @@ Rules (from `dashboard-status-rules.md`), structural signals only:
   Done and dropped tickets always read as their state.
 - Initiative-level tickets (those `tickets.py` lists with the initiative folder
   as their `epic`) show after the epics, at the initiative level.
+- Backlog tickets (the project's `_bmad-output/backlog/`, no initiative) are
+  read the same way: `tickets.py` gives them `backlog` as their `epic`.
 """
 
 import json
@@ -64,6 +66,8 @@ class Ticket:
     stale: bool
     # In `tickets.py next` `ready_to_start`; only planned and backlog words use it.
     ready: bool = False
+    # In `tickets.py next` `ready_to_refine`: needs refining before it builds.
+    refine: bool = False
     # The plan's reason for a `blocked` ticket; the unblock prompt quotes it.
     blocked_reason: str = ""
     # No plan or leaf file: its entry, `<folder>/tickets.toml#<id>` relative to
@@ -79,6 +83,7 @@ class NextInfo:
     """What `tickets.py next` says about an initiative, by ticket ref."""
     waiting: dict[str, list[str]]  # blocked ticket -> the refs it waits on
     ready: set[str]  # tickets ready to start
+    refine: set[str] = field(default_factory=set)  # tickets ready to refine
 
 
 @dataclass
@@ -193,7 +198,9 @@ def load_next(root: Path, initiative_dir: Path) -> NextInfo | None:
         return None
     ready_rows = next_rows(data, "ready_to_start")
     blocked_rows = next_rows(data, "blocked")
-    if ready_rows is None or blocked_rows is None:
+    # Absent in older `tickets.py`: then nothing needs refining.
+    refine_rows = next_rows(data, "ready_to_refine") if "ready_to_refine" in data else []
+    if ready_rows is None or blocked_rows is None or refine_rows is None:
         return None
 
     waiting = {}
@@ -203,12 +210,13 @@ def load_next(root: Path, initiative_dir: Path) -> NextInfo | None:
             return None
         if refs:
             waiting[row["ref"]] = refs
-    ready = set()
-    for row in ready_rows:
-        if not isinstance(row.get("ref"), str):
-            return None
-        ready.add(row["ref"])
-    return NextInfo(waiting=waiting, ready=ready)
+    ready, refine = set(), set()
+    for rows, refs in ((ready_rows, ready), (refine_rows, refine)):
+        for row in rows:
+            if not isinstance(row.get("ref"), str):
+                return None
+            refs.add(row["ref"])
+    return NextInfo(waiting=waiting, ready=ready, refine=refine)
 
 
 def parse_time(text: str) -> datetime | None:
@@ -506,6 +514,7 @@ def make_ticket(
         updated=updated,
         stale=open_ticket and updated is not None and is_old(updated, now),
         ready=next_info is not None and ref in next_info.ready,
+        refine=next_info is not None and ref in next_info.refine,
         blocked_reason=str(raw.get("blocked_reason") or ""),
         entry=entry,
         hitl=bool(raw.get("hitl")),
