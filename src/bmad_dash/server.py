@@ -130,6 +130,7 @@ def place_previews(
     ports: dict[str, int] = {}
     hosts: dict[str, str] = {}
     starts: dict[str, tuple[str | None, str | None]] = {}  # (local, staging)
+    unset: list[str] = []  # worktrees whose `.env` gives no port yet: down, not probed
     for initiative in initiatives:
         entry = config.get(initiative.project)
         if entry is None or not initiative.worktrees:
@@ -138,6 +139,9 @@ def place_previews(
         port = local_port(initiative.worktrees[0].path, entry)
         if port is not None:
             ports[initiative.key] = port
+        elif entry.port_key and (initiative.worktrees[0].path / ".git").is_file():
+            # A linked worktree: `local_port` gives no `default_port` there.
+            unset.append(initiative.key)
         pr = prs.get(initiative.key)
         if entry.staging_rule and pr is not None and pr.state in ("open", "draft"):
             host = staging_host(entry.staging_rule, pr.head)
@@ -154,6 +158,7 @@ def place_previews(
         key: LocalPreview(port, results[key][local_urls[key]], starts[key][0])
         for key, port in ports.items()
     }
+    local.update({key: LocalPreview(None, False, starts[key][0]) for key in unset})
     staging = {
         key: StagingPreview(host, results[key][staging_urls[key]], starts[key][1])
         for key, host in hosts.items()

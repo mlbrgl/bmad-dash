@@ -261,3 +261,14 @@ def test_staging_url():
 
 def test_unresolvable_staging_host_is_down():
     assert probe("http://staging-site-x.invalid/", timeout=1) is False
+
+
+def test_linked_worktree_without_env_port_has_no_url(tmp_path):
+    # A linked worktree's `.git` is a file: `default_port` is the main
+    # checkout's server, so it has no URL until its `.env` gives a port.
+    (tmp_path / ".git").write_text("gitdir: /elsewhere\n")
+    assert local_url(tmp_path, GRAPHER) is None
+    write_env(tmp_path, "ADMIN_SERVER_PORT=3827\n")
+    assert local_url(tmp_path, GRAPHER) == "http://localhost:3827/"
+    # Without a port_key every checkout shares `default_port`.
+    assert local_url(tmp_path, PreviewConfig(default_port=3030)) == "http://localhost:3030/"

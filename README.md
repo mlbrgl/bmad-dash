@@ -84,6 +84,10 @@ or any empty part of a row to show its tree; click an empty part of a tree row t
   "Couldn't reach GitHub". Repos without a `github.com` remote skip it
   silently.
 
+A worktree whose `.env` sets no `port_key` yet shows its local server as
+down, and resume offers `local_start`; only the main checkout falls back to
+`default_port`.
+
 A row without a worktree says `no worktree` and has no actions.
 
 ## Test

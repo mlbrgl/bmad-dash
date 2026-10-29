@@ -420,9 +420,10 @@ EMPTY_PLACE = '<span class="place" aria-hidden="true"></span>'
 
 @dataclass(frozen=True)
 class LocalPreview:
-    """A worktree's local server: its port, and whether it answered."""
+    """A worktree's local server: its port, and whether it answered.
+    `port` None: the worktree's `.env` gives none yet, so it is down."""
 
-    port: int
+    port: int | None
     up: bool
     start: str | None = None  # the project's `local_start`, for `resume`
 
@@ -437,13 +438,18 @@ LAPTOP_ICON = (
 )
 
 
+def local_host(preview: LocalPreview) -> str:
+    """`localhost:<port>`, or "the local server" when no port is known yet."""
+    return f"localhost:{preview.port}" if preview.port is not None else "the local server"
+
+
 def local_place(preview: LocalPreview | None) -> str:
     """The local place icon. Up: a link to the server, in a new tab. Down: a
     muted laptop that isn't a link but takes focus, so its tooltip can be read.
     No preview (no config for the project): an empty slot."""
     if preview is None:
         return EMPTY_PLACE
-    host = f"localhost:{preview.port}"
+    host = local_host(preview)
     if preview.up:
         label = escape(f"Open {host} (opens in new tab)")
         return (
@@ -605,7 +611,7 @@ def resume_link(
     """`resume`: its prompt adds one line per preview that is down."""
     lines = [resume_prompt(slug)]
     if preview is not None and not preview.up:
-        lines.append(down_line(f"localhost:{preview.port}", preview.start))
+        lines.append(down_line(local_host(preview), preview.start))
     if staging is not None and not staging.up:
         lines.append(down_line(staging.host, staging.start))
     prompt = "\n".join(lines)

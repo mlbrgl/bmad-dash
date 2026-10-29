@@ -15,6 +15,9 @@ from conftest import STACK_TIMES, add_walkthrough
 
 import bmad_dash.server as server_module
 from bmad_dash import commands as commands_module
+from bmad_dash.initiatives import Initiative, Worktree
+from bmad_dash.page import LocalPreview
+from bmad_dash.previews import PreviewConfig
 
 
 @pytest.fixture
@@ -575,3 +578,32 @@ def test_resume_offers_to_start_both_down_previews(project, serve, tmp_path, mon
     assert prompt.endswith(
         f"\nlocalhost:{port} isn't answering: offer to start it with `make up.worktree`"
         "\nstaging-site-feature-a isn't answering: offer to start it with `open -a Tailscale`")
+
+
+
+def test_worktree_without_env_port_offers_to_start(project, serve, tmp_path, monkeypatch):
+    config = ('[project]\nport_key = "ADMIN_SERVER_PORT"\ndefault_port = 3030\n'
+              'local_start = "make up.worktree"\n')
+    html = staging_page(project, serve, tmp_path, monkeypatch, closed_port(), config=config)
+    row = next(r for r in html.split('role="row"') if "initiative-matched" in r)
+    assert "the local server isn&#x27;t answering: resume offers to start it" in row
+    href = re.search(r'<a class="btn btn-1 chip" href="([^"]+)"', row).group(1)
+    prompt = unquote(href.replace("&amp;", "&").split("q=", 1)[1])
+    assert prompt.endswith(
+        "\nthe local server isn't answering: offer to start it with `make up.worktree`")
+    # The main checkout keeps `default_port`.
+    main_row = next(r for r in html.split('role="row"') if "initiative-shared" in r)
+    assert "localhost:3030" in main_row
+
+
+def test_main_checkout_without_any_port_keeps_an_empty_slot(tmp_path):
+    # Only a linked worktree (its `.git` is a file) shows down without a port.
+    main, linked = tmp_path / "main", tmp_path / "linked"
+    (main / ".git").mkdir(parents=True)
+    linked.mkdir()
+    (linked / ".git").write_text("gitdir: /elsewhere\n")
+    initiatives = [Initiative("a", "A", [Worktree(main, "main")], project="p"),
+                   Initiative("b", "B", [Worktree(linked, "b")], project="p")]
+    config = {"p": PreviewConfig(port_key="ADMIN_SERVER_PORT", local_start="make up")}
+    local, _ = server_module.place_previews(initiatives, config, {})
+    assert local == {"p/b": LocalPreview(None, False, "make up")}

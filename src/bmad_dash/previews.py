@@ -123,9 +123,15 @@ def env_port(worktree_path: Path, key: str) -> int | None:
 
 def local_port(worktree_path: Path, config: PreviewConfig) -> int | None:
     """The worktree's local port: its `.env` value, else `default_port`.
-    None when the entry gives neither a key nor a default."""
+    None when the entry gives neither a key nor a default, and for a linked
+    worktree (its `.git` is a file) whose `.env` sets no port: there
+    `default_port` would be the main checkout's server, not its own."""
     port = env_port(worktree_path, config.port_key) if config.port_key else None
-    return port if port is not None else config.default_port
+    if port is not None:
+        return port
+    if config.port_key and (worktree_path / ".git").is_file():
+        return None
+    return config.default_port
 
 
 def local_url(worktree_path: Path, config: PreviewConfig) -> str | None:
