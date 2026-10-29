@@ -84,6 +84,20 @@ or any empty part of a row to show its tree; click an empty part of a tree row t
   "Couldn't reach GitHub". Repos without a `github.com` remote skip it
   silently.
 
+- **auto** (an epic's tree row) opens a session that builds the epic's
+  ready tickets unattended with `/bmad-build-auto`, up to 3 at once, each in
+  a worktree `claude -w` makes from the initiative's branch. It merges each
+  one back when it is built. A failed run or a merge conflict stops the
+  loop and keeps that run's worktree and branch. Runs use
+  `--permission-mode auto`. The loop sets `BMAD_ACTIVE_INITIATIVE` for each
+  run, because `claude -w` copies the main checkout's BMad config, not the
+  initiative's; something outside this repo (e.g. a user-level SessionStart
+  hook) must turn it into the run's `active_initiative`. Setting up the new
+  worktree (dependencies, `.env`, servers) is separate: the project's
+  `local_start` does it, not SessionStart hooks or `.worktreeinclude`. With
+  a `local_start`, each run is told so.
+  See `projects.toml.example`.
+
 A worktree whose `.env` sets no `port_key` yet shows its local server as
 down, and resume offers `local_start`; only the main checkout falls back to
 `default_port`.

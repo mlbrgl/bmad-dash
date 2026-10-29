@@ -150,10 +150,14 @@ def ticket_cell(ticket: Ticket, worktree: Worktree | None) -> str:
     return f'<span role="cell">{link}</span>'
 
 
-def item_cell(item: TreeItem, epic: TreeItem | None, worktree: Worktree | None) -> str:
+def item_cell(
+    item: TreeItem, epic: TreeItem | None, worktree: Worktree | None,
+    local_start: str | None = None,
+) -> str:
     """An epic's or retro's actions as links when the initiative
-    has a worktree and there are any, else its word as a grey status."""
-    actions = item_actions(item, epic) if worktree is not None else []
+    has a worktree and there are any, else its word as a grey status.
+    `local_start`: the project's, for an epic's `auto`."""
+    actions = item_actions(item, epic, local_start) if worktree is not None else []
     if not actions:
         return word_cell(item_word(item, epic))
     links = [action_link(worktree, prompt, text, LINK, label)
@@ -258,6 +262,7 @@ def done_epic_rows(
     worktree: Worktree | None,
     group_id: str,
     closed_prefix: str,
+    local_start: str | None = None,
 ) -> list[str]:
     """A hidden group of the done and dropped epics, each rendered as it would
     be open, then one button row that shows them. Nothing when none."""
@@ -268,7 +273,7 @@ def done_epic_rows(
     group = "".join(
         row for epic in epics
         for row in item_rows(project, epic, now, show_stale, worktree,
-                             closed_prefix=closed_prefix)
+                             closed_prefix=closed_prefix, local_start=local_start)
     )
     # No role: it holds the epics' closed-tickets rowgroups.
     return hidden_group(group_id, group, f"Show {noun}", "Hide done epics", role="")
@@ -282,11 +287,12 @@ def item_rows(
     worktree: Worktree | None = None,
     epic: TreeItem | None = None,
     closed_prefix: str = "closed",
+    local_start: str | None = None,
 ) -> list[str]:
     """The item's row, then its children's, then its tickets'. With
     `show_stale` off, no row gets a stale tag. An epic's closed tickets hide
     behind one button after its last ticket row; `closed_prefix` keeps the
-    group's id unique on the page.
+    group's id unique on the page. `local_start`: the project's, for `auto`.
 
     An epic with exactly one spec nests its tickets under that spec, right
     after the spec's row (before any walkthroughs).
@@ -294,7 +300,7 @@ def item_rows(
     head = tree_row(
         item.kind,
         name_cell(project, item.name, item.path, item.report, item.report_label),
-        item_cell(item, epic, worktree),
+        item_cell(item, epic, worktree, local_start),
         updated_cell(item.updated, show_stale and item.state == STALE, now),
         "t-epic" if item.kind == "epic" else "",
         file_href(project, item.path) if item.path is not None else "",
@@ -304,7 +310,8 @@ def item_rows(
     specs = [child for child in item.children if child.kind == "spec"]
     nest_under = specs[0] if len(specs) == 1 else None
     for child in item.children:
-        rows += item_rows(project, child, now, show_stale, worktree, item, closed_prefix)
+        rows += item_rows(project, child, now, show_stale, worktree, item, closed_prefix,
+                          local_start)
         if child is nest_under:
             rows += closed_ticket_rows(project, item.tickets, now, show_stale, worktree, group_id)
     if nest_under is None:
@@ -323,7 +330,9 @@ def has_panel(initiative: Initiative) -> bool:
     return bool(initiative.tree or initiative.top_tickets or initiative.tickets is None)
 
 
-def panel_content(initiative: Initiative, now: datetime) -> str:
+def panel_content(
+    initiative: Initiative, now: datetime, local_start: str | None = None
+) -> str:
     note = ""
     if initiative.tickets is None:
         note = f'<p class="err t-note">{TICKETS_FAILED}</p>'
@@ -344,13 +353,13 @@ def panel_content(initiative: Initiative, now: datetime) -> str:
     for item in epics:
         if not is_done_epic(item):
             rows += item_rows(project, item, now, show_stale, worktree,
-                              closed_prefix=closed_prefix)
+                              closed_prefix=closed_prefix, local_start=local_start)
     # Initiative-level tickets come after the open epics.
     rows += closed_ticket_rows(project, initiative.top_tickets, now, show_stale, worktree,
                                closed_prefix)
     # Done and dropped epics fold behind one button, the tree's last row.
     rows += done_epic_rows(project, [e for e in epics if is_done_epic(e)], now, show_stale,
-                           worktree, f"done-epics-{initiative.key}", closed_prefix)
+                           worktree, f"done-epics-{initiative.key}", closed_prefix, local_start)
     label = escape(f"{initiative.title} contents")
     return f'{note}<div class="tree" role="table" aria-label="{label}">{"".join(rows)}</div>'
 
@@ -379,12 +388,13 @@ def initiative_cell(initiative: Initiative, panel_id: str, is_open: bool) -> str
 
 
 def panel_cell(
-    initiative: Initiative, panel_id: str, is_open: bool, now: datetime
+    initiative: Initiative, panel_id: str, is_open: bool, now: datetime,
+    local_start: str | None = None,
 ) -> str:
     hidden = "" if is_open else " hidden"
     return (
         f'<div class="panel" role="cell" id="{panel_id}"{hidden}>'
-        f"{panel_content(initiative, now)}</div>"
+        f"{panel_content(initiative, now, local_start)}</div>"
     )
 
 
@@ -631,6 +641,9 @@ ROOT_FAILED = "Couldn't load"
 # Default `prs`: no row has a PR. Read-only, so safe as a default argument.
 NO_PRS: Mapping[str, PullRequest] = MappingProxyType({})
 
+# Default `local_starts`: no project has one, so `auto` gives no worktree hint.
+NO_LOCAL_STARTS: Mapping[str, str] = MappingProxyType({})
+
 
 def pr_link(pr: PullRequest) -> str:
     """The PR place icon: its state icon alone, opening the PR in a new tab.
@@ -675,6 +688,7 @@ def initiative_row(
     prs: Mapping[str, PullRequest] = NO_PRS,
     previews: Mapping[str, LocalPreview] = NO_PREVIEWS,
     stagings: Mapping[str, StagingPreview] = NO_STAGINGS,
+    local_starts: Mapping[str, str] = NO_LOCAL_STARTS,
 ) -> str:
     """One grid row. DOM order: the four cells, then the panel, so Tab runs
     title toggle -> VS Code -> local -> staging -> PR -> resume -> doc chips -> tree links. CSS puts the
@@ -696,7 +710,8 @@ def initiative_row(
         ),
     ]
     if has_panel(initiative):
-        cells.append(panel_cell(initiative, panel_id, is_open, now))
+        cells.append(panel_cell(initiative, panel_id, is_open, now,
+                                local_starts.get(initiative.key)))
     css_class = "init is-finished" if initiative.finished else "init"
     # The page script keeps a close-only row closed, even when saved open.
     closed_start = " data-closed-start" if only_close(initiative) else ""
@@ -743,6 +758,7 @@ def page_content(
     prs: Mapping[str, PullRequest] = NO_PRS,
     previews: Mapping[str, LocalPreview] = NO_PREVIEWS,
     stagings: Mapping[str, StagingPreview] = NO_STAGINGS,
+    local_starts: Mapping[str, str] = NO_LOCAL_STARTS,
 ) -> str:
     """Unfinished rows in the table, finished ones behind Show finished (n).
     `initiatives` come sorted; `roots_text` are already escaped, in CLI order.
@@ -762,7 +778,7 @@ def page_content(
         rows = "\n".join(
             initiative_row(
                 initiative, index, index == open_index, now, vscode_failed, prs, previews,
-                stagings,
+                stagings, local_starts,
             )
             for index, initiative in enumerate(current)
         )
@@ -778,7 +794,7 @@ def page_content(
         rows = "\n".join(
             initiative_row(
                 initiative, len(current) + index, False, now, vscode_failed, prs,
-                previews, stagings,
+                previews, stagings, local_starts,
             )
             for index, initiative in enumerate(finished)
         )
@@ -804,6 +820,7 @@ def render_page(
     failed_roots: Sequence[Path] = (),
     previews: Mapping[str, LocalPreview] = NO_PREVIEWS,
     stagings: Mapping[str, StagingPreview] = NO_STAGINGS,
+    local_starts: Mapping[str, str] = NO_LOCAL_STARTS,
 ) -> str:
     """The whole page for every root in `roots` (CLI order). `vscode_failed`
     is a `<project>/<slug>` from the URL; it only picks which row shows the
@@ -813,14 +830,16 @@ def render_page(
     the header says so. `failed_roots` couldn't load at all: the header names
     each, and the empty state leaves them out. `previews` maps an initiative
     key to its local server (port and up/down), `stagings` to its staging
-    server (host and up/down); a key without one shows an empty slot."""
+    server (host and up/down); a key without one shows an empty slot.
+    `local_starts` maps an initiative key to its project's `local_start`, named
+    in an epic's `auto`; a key without one gets no worktree hint."""
     if now is None:
         now = datetime.now()
     roots_text = [escape(display_path(root)) for root in roots]
     loaded_text = [escape(display_path(root)) for root in roots if root not in failed_roots]
     content = page_content(
         by_activity(initiatives), loaded_text, now, vscode_failed, prs, previews,
-        stagings,
+        stagings, local_starts,
     )
     paths = "".join(f'<span class="path">{text}</span>' for text in roots_text)
     errors = f'<span class="err">{GITHUB_FAILED}</span>' if github_failed else ""

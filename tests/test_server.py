@@ -580,6 +580,12 @@ def test_resume_offers_to_start_both_down_previews(project, serve, tmp_path, mon
         "\nstaging-site-feature-a isn't answering: offer to start it with `open -a Tailscale`")
 
 
+def test_local_starts_follow_each_project_entry():
+    initiatives = [Initiative("a", "A", project="with"), Initiative("b", "B", project="without"),
+                   Initiative("c", "C", project="unlisted")]
+    config = {"with": PreviewConfig(local_start="make up"), "without": PreviewConfig()}
+    assert server_module.local_starts(initiatives, config) == {"with/a": "make up"}
+
 
 def test_worktree_without_env_port_offers_to_start(project, serve, tmp_path, monkeypatch):
     config = ('[project]\nport_key = "ADMIN_SERVER_PORT"\ndefault_port = 3030\n'

@@ -166,6 +166,18 @@ def place_previews(
     return local, staging
 
 
+def local_starts(
+    initiatives: list[Initiative], config: dict[str, PreviewConfig]
+) -> dict[str, str]:
+    """Initiative key -> its project's `local_start`, for an epic's `auto`."""
+    starts: dict[str, str] = {}
+    for initiative in initiatives:
+        entry = config.get(initiative.project)
+        if entry is not None and entry.local_start:
+            starts[initiative.key] = entry.local_start
+    return starts
+
+
 def _run_code(args: list[str]) -> None:
     """Run `code <args>` with no shell and no output. Does not wait."""
     subprocess.Popen(
@@ -238,7 +250,8 @@ def make_server(
                 prs.update(root_prs or {})  # keys are `<project>/<slug>`: no clashes
             github_failed = any(root_prs is None for _, root_prs in loaded)
             # Read fresh each load, after the initiatives: reload re-probes.
-            local, staging = place_previews(initiatives, load_config(config_path), prs)
+            config = load_config(config_path)
+            local, staging = place_previews(initiatives, config, prs)
             body = render_page(
                 initiatives,
                 roots,
@@ -248,6 +261,7 @@ def make_server(
                 failed_roots=failed_roots,
                 previews=local,
                 stagings=staging,
+                local_starts=local_starts(initiatives, config),
             ).encode("utf-8")
             self.send_html(body)
 

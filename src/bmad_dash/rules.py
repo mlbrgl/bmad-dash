@@ -21,6 +21,10 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
 - Statuses have three colours (`status_class`): green built, grey (the
   default) nothing to do, warm blocked. Actions are blue, warm for `unblock`
   (`action_css`). Tree cells only: the row has no status words.
+- An epic's `auto` builds its tickets unattended, up to 3 at once, each in
+  a worktree Claude makes from the initiative's branch, merged back when
+  built (`AUTO_PROMPT`). With a `local_start`, each run is told it sets up
+  a new worktree (`WORKTREE_HINT`).
 - A retro's `open items` reads `accepted` under a finished epic (`retro_word`).
 - A finished initiative's tree shows no stale tags.
 - The PR icon shows the PR of the highest branch that has one, in the
@@ -37,6 +41,7 @@ Rules from `_bmad-output/initiative-bmad-dash/spec-bmad-dash/dashboard-status-ru
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Iterable, Mapping, Sequence, Set
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -110,17 +115,42 @@ def action_prompt(ticket: Ticket, action: str) -> str:
     return prompt
 
 
+# An epic's `auto`: up to 3 tickets at once, each in a worktree `claude -w`
+# makes; baseRef head starts it from this branch, not trunk. Claude copies the
+# main checkout's BMad config, so BMAD_ACTIVE_INITIATIVE (read by the user's
+# link-bmad-into-worktree.sh hook) gives the run this initiative instead.
+# Headless runs can't answer a permission prompt, hence `--permission-mode
+# auto`. Claude leaves the worktree locked, so it must be unlocked before
+# removal. `{hint}` passes WORKTREE_HINT to each run with
+# --append-system-prompt, or is empty: the -p stays a bare ticket ref.
 AUTO_PROMPT = (
-    "/loop Build {epic} unattended, one fresh headless run per ticket. "
-    "Each round: run tickets.py next. Stop and report if a ticket of this epic "
-    "has plan status in-progress, or is halted (plan status blocked, or "
-    "blocked_at set); built and in-review tickets count as finished, and a "
-    "ticket only waiting on prerequisites is not halted. If the first ready "
-    "ticket of this epic is hitl, stop. If one is ready, start "
-    "claude -p \"/bmad-build-auto ticket <ref>\" in the background in this "
-    "worktree; when it exits, check the ticket's plan status and its last "
-    "commit, then schedule the next round. If none is ready, stop. "
-    "Stop for no other reason."
+    "/loop Build {epic} unattended, up to 3 tickets at once, each in its own "
+    "worktree. Each round, run tickets.py next. Stop and report if a ticket of "
+    "this epic is halted (plan status blocked, or blocked_at set), or in "
+    "progress without a run of yours on it; built and in-review tickets count "
+    "as finished. Start ready, non-hitl tickets of this epic until 3 runs are "
+    "going, but only those whose prerequisites are merged into this "
+    "worktree's branch (tickets.py next counts in-review as done). For each, "
+    "start in the background, from this worktree: "
+    "BMAD_ACTIVE_INITIATIVE=<the folder tickets.py next reports> claude -w "
+    "<this worktree's folder name>-<ref> --settings "
+    "'{{\"worktree\":{{\"baseRef\":\"head\"}}}}' --permission-mode auto{hint} "
+    "-p \"/bmad-build-auto ticket <ref>\". "
+    "When a run exits, check its plan status and last commit. If it built "
+    "with a new commit, merge its branch into this worktree's branch, one run "
+    "at a time, then unlock and remove its worktree, and delete its branch. "
+    "If a run did not end built with a new commit, or its merge conflicts "
+    "(abort the merge): start no new run, let the going runs finish, then stop and "
+    "report that ticket and the reason, and leave its worktree and branch in "
+    "place. Stop when nothing is ready and no run is going. Stop for no other "
+    "reason."
+)
+
+# Added to an auto prompt when the project has a `local_start`: nothing else
+# sets up a worktree `claude -w` makes.
+WORKTREE_HINT = (
+    "A new worktree may first need `{start}` for its dependencies, .env and "
+    "servers, before typecheck, tests or previews."
 )
 
 # An action is (link text, prompt, aria-label).
@@ -146,12 +176,23 @@ def resume_prompt(slug: str) -> str:
     return f"/bmad Resume work on {slug}"
 
 
-def epic_actions(epic: TreeItem) -> list[Action]:
-    """The actions an epic's cell offers; [] means it shows a status."""
+def auto_prompt(slug: str, local_start: str | None = None) -> str:
+    """The prompt an epic's `auto` opens. With the project's `local_start`,
+    each run's system prompt gets the worktree hint."""
+    if not local_start:
+        return AUTO_PROMPT.format(epic=slug, hint="")
+    hint = WORKTREE_HINT.format(start=local_start)
+    return AUTO_PROMPT.format(epic=slug, hint=f" --append-system-prompt {shlex.quote(hint)}")
+
+
+def epic_actions(epic: TreeItem, local_start: str | None = None) -> list[Action]:
+    """The actions an epic's cell offers; [] means it shows a status.
+    `local_start`: the project's, for `auto`'s worktree hint."""
     slug = epic.name
-    auto = make_action("auto", AUTO_PROMPT.format(epic=slug), f"build {slug} unattended")
+    auto_action = make_action("auto", auto_prompt(slug, local_start),
+                              f"build {slug} unattended")
     if epic.word in ("not started", "in progress"):
-        return [auto]
+        return [auto_action]
     if epic.word == "to retro":
         return [make_action("retro", f"/bmad-retrospective {slug}",
                             f"run the retrospective for {slug}")]
@@ -200,11 +241,13 @@ def action_css(action: str) -> str:
     return WARM if action == "unblock" else LINK
 
 
-def item_actions(item: TreeItem, epic: TreeItem | None) -> list[Action]:
+def item_actions(
+    item: TreeItem, epic: TreeItem | None, local_start: str | None = None
+) -> list[Action]:
     """The actions an epic's or retro's cell offers: an epic's own, a retro's
-    (needs its epic), else none."""
+    (needs its epic), else none. `local_start`: the project's, for `auto`."""
     if item.kind == "epic":
-        return epic_actions(item)
+        return epic_actions(item, local_start)
     if item.kind == "retro" and epic is not None:
         return retro_actions(item, epic)
     return []

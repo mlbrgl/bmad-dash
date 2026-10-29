@@ -4,7 +4,9 @@
 # port_key      .env key in each worktree holding its local server's port
 # default_port  port used when .env doesn't set port_key, in the main checkout
 #               only: a worktree without it shows down, and resume offers local_start
-# local_start   command resume offers to start the local server
+# local_start   command that sets up a worktree (dependencies, .env, servers):
+#               resume offers it when the local server is down, and an
+#               epic's auto names it to each run in a new worktree
 # staging_rule  how the staging host is worked out
 # staging_start command resume offers when staging can't be reached
 #

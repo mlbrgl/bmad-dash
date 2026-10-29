@@ -1,4 +1,5 @@
 import re
+import shlex
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -1325,6 +1326,49 @@ def test_in_progress_epic_has_only_auto_even_with_a_rejected_retro():
         assert ">auto<svg" in html and "resume" not in html
         (auto,) = hrefs(html)
         assert auto.startswith("/loop Build epic-x unattended")
+
+
+HINT = ("A new worktree may first need `make up.worktree` for its dependencies, "
+        ".env and servers, before typecheck, tests or previews.")
+
+
+def test_auto_runs_parallel_worktrees():
+    (auto,) = item_actions(epic_item("in progress"), None, "make up.worktree")
+    prompt = auto[1]
+    assert prompt.startswith("/loop Build epic-x unattended, up to 3 tickets at once")
+    assert """--settings '{"worktree":{"baseRef":"head"}}'""" in prompt
+    assert "BMAD_ACTIVE_INITIATIVE=<the folder tickets.py next reports> claude -w" in prompt
+    assert "<this worktree's folder name>-<ref>" in prompt
+    assert "--permission-mode auto" in prompt
+    assert "merged into this worktree's branch" in prompt
+    assert "non-hitl" in prompt
+    # The hint reaches each run's system prompt; its -p stays a bare ref.
+    assert (f"--append-system-prompt {shlex.quote(HINT)} "
+            '-p "/bmad-build-auto ticket <ref>". ') in prompt
+    # A failed run or a conflict stops the loop and keeps the evidence.
+    assert ("did not end built with a new commit, or its merge conflicts "
+            "(abort the merge)") in prompt
+    assert "start no new run" in prompt
+    assert "leave its worktree and branch in place" in prompt
+    assert prompt.endswith("Stop for no other reason.")
+
+
+def test_auto_without_local_start_has_no_hint():
+    (auto,) = item_actions(epic_item("in progress"), None)
+    assert "up to 3 tickets at once" in auto[1]
+    assert '--permission-mode auto -p "/bmad-build-auto ticket <ref>"' in auto[1]
+    assert "A new worktree may first need" not in auto[1]
+
+
+def test_local_starts_reach_the_epic_auto_link():
+    wts = [Worktree(WT, "main")]
+    initiative = Initiative("initiative-a", "A", wts, tree=[epic_item("in progress")])
+    html = render_page([initiative], [Path("/root")], now=NOW,
+                       local_starts={f"{PROJECT}/initiative-a": "make up"})
+    (auto,) = hrefs(html.split('class="tree"')[1])
+    assert "claude -w" in auto and "need `make up`" in auto
+    (auto,) = hrefs(render([initiative]).split('class="tree"')[1])
+    assert "claude -w" in auto and "may first need" not in auto
 
 
 def test_to_retro_epic_has_retro_only():
