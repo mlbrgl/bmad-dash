@@ -1,0 +1,3 @@
+# Gitignored local config that Claude copies into each new worktree.
+projects.toml
+.claude/launch.json

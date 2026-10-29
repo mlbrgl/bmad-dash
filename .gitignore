@@ -1,5 +1,5 @@
 /_bmad/
-/_bmad-output/
+/_bmad-output
 /.claude/worktrees/
 .venv/
 __pycache__/
