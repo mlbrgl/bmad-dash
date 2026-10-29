@@ -11,6 +11,7 @@ from bmad_dash.initiatives import (
     list_initiatives,
     load_backlog,
     make_initiative,
+    worktrees_by_slug,
 )
 from bmad_dash.page import render_page
 from bmad_dash.stack import GraphiteStack
@@ -41,6 +42,23 @@ def test_several_matches_keep_only_the_first_listed(project):
     # Main checkout and wt-b both claim it; git lists the main checkout first.
     worktrees = by_slug(project)["initiative-shared"].worktrees
     assert worktrees == [Worktree(project, "main")]
+
+
+def test_parent_wins_over_its_child_worktrees(tmp_path):
+    # Parallel auto's children are named `<parent folder>-<ref>`; whichever
+    # order git lists them in, the parent keeps the row.
+    parent = tmp_path / "x"
+    children = [tmp_path / "x-3", tmp_path / "x-12"]
+    for path in (parent, *children):
+        write_config(path, '[core]\nactive_initiative = "initiative-a"\n')
+    worktrees = [Worktree(children[0], "worktree-x-3"), Worktree(parent, "feature"),
+                 Worktree(children[1], "worktree-x-12")]
+    assert worktrees_by_slug(tmp_path, worktrees) == {"initiative-a": worktrees[1]}
+    # Unrelated names still go by git's order.
+    other = tmp_path / "y"
+    write_config(other, '[core]\nactive_initiative = "initiative-a"\n')
+    assert worktrees_by_slug(tmp_path, [Worktree(other, "y"), worktrees[1]]) == {
+        "initiative-a": Worktree(other, "y")}
 
 
 def test_no_match_has_no_worktrees(project):

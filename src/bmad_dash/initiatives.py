@@ -182,17 +182,31 @@ def worktrees_by_slug(
     root: Path, worktrees: list[Worktree] | None = None
 ) -> dict[str, Worktree]:
     """Initiative slug -> the worktree working on it.
-    One worktree per initiative: the first one `git worktree list` gives wins.
+    One worktree per initiative: the first one `git worktree list` gives wins,
+    but never a child over its parent. A child is a worktree parallel auto
+    made, named `<parent's folder name>-<ref>`: it mirrors one of the parent's
+    tickets, so the row stays the parent's.
     Pass `worktrees` from `list_worktrees` to skip calling git again.
     When git fails, no initiative has a worktree."""
     if worktrees is None:
         worktrees = list_worktrees(root) or []
-    claimed: dict[str, Worktree] = {}
+    claimants: dict[str, list[Worktree]] = {}
     for worktree in worktrees:
         slug = active_initiative(worktree.path)
-        if slug and slug not in claimed:
-            claimed[slug] = worktree
+        if slug:
+            claimants.setdefault(slug, []).append(worktree)
+    claimed: dict[str, Worktree] = {}
+    for slug, candidates in claimants.items():
+        # A shortest folder name is never a child, so one always remains.
+        parents = [w for w in candidates
+                   if not any(is_child(w, other) for other in candidates)]
+        claimed[slug] = parents[0]
     return claimed
+
+
+def is_child(worktree: Worktree, other: Worktree) -> bool:
+    """True when `worktree`'s folder is named `<other's folder name>-<suffix>`."""
+    return worktree.path.name.startswith(other.path.name + "-")
 
 
 def initiative_worktree(
