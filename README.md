@@ -5,6 +5,8 @@ A small local dashboard for a BMad project. It lists every
 working on it, read from each worktree's `_bmad/custom/config.user.toml`
 (`[core] active_initiative`). Initiatives no worktree points at show "no worktree".
 
+![The dashboard: two projects in one table, one initiative expanded to its spec, walkthrough, epics and tickets](docs/screenshot.jpg)
+
 It only reads the project, binds `127.0.0.1` only, and rebuilds the page on
 every request.
 
@@ -103,6 +105,10 @@ down, and resume offers `local_start`; only the main checkout falls back to
 `default_port`.
 
 A row without a worktree says `no worktree` and has no actions.
+
+Each project's `_bmad-output/backlog/` shows as one **Backlog** row after the
+initiatives, when it holds tickets with no initiative. Its tickets open in the
+main checkout; tickets ready to refine offer `refine`.
 
 ## Test
 
